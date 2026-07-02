@@ -3,11 +3,15 @@
   "displayName": "Github Copilot Report",
   "description": "Browse your GitHub Copilot chat history with per-prompt token & AIC usage, filter by week/month, and export a detailed Excel report.",
   "version": "1.2.0",
-  "publisher": "nashtech",
+  "publisher": "hugnt-vse",
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hugnt/github-copilot-report.git"
   },
   "categories": [
     "Other",
