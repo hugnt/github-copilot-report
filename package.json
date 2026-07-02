@@ -158,6 +158,12 @@
           "type": "object",
           "default": {},
           "description": "Override / add AIC pricing per model. Keys are normalized model ids (e.g. \"claude-sonnet-4.6\"), values are objects: { \"inputCost\": 300, \"outputCost\": 1500, \"cacheCost\": 30 } expressed in AIC per 1,000,000 tokens."
+        },
+        "githubCopilotReport.usdPerAic": {
+          "type": "number",
+          "default": 0.01,
+          "minimum": 0,
+          "description": "USD value of one AIC (AI Credit), used to show a $ estimate next to AIC. GitHub Copilot bills 1 AI credit = $0.01 USD (a $10 budget = 1,000 credits); change this only if your plan's rate differs. Takes effect after a refresh."
         }
       }
     }

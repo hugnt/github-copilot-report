@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import Fuse from 'fuse.js';
-import { registerModelPricing, computeAic, normalizeModelId } from './modelPricing';
+import { registerModelPricing, computeAic, normalizeModelId, setUsdPerAic, DEFAULT_USD_PER_AIC, NANO_AIU_PER_AIC } from './modelPricing';
 
 const CONFIG_NS = 'githubCopilotReport';
 
@@ -89,7 +89,8 @@ export interface PromptUsage {
     outputTokens?: number;  // completion tokens produced
     cacheTokens?: number;   // cached input tokens (billed at cache rate)
     model?: string;         // raw model id (e.g. "copilot/claude-sonnet-4.6")
-    aic?: number;           // computed AI Credits (undefined if pricing unknown)
+    aic?: number;           // AI Credits — actual (from nanoAiu) if available, else computed
+    nanoAiu?: number;       // raw billed credits Copilot recorded (set only when present)
     requestId?: string;
     responseId?: string;
 }
@@ -161,6 +162,8 @@ export class ChatHistoryProvider {
 
         // Load pricing overrides from settings each refresh.
         const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
+        // The AIC→USD rate (deciding money knob). Changing the setting takes effect on refresh.
+        setUsdPerAic(cfg.get<number>('usdPerAic', DEFAULT_USD_PER_AIC));
         const overrides = cfg.get<Record<string, any>>('modelPricing', {});
         if (overrides && typeof overrides === 'object') {
             for (const [id, p] of Object.entries(overrides)) {
@@ -394,18 +397,42 @@ export class ChatHistoryProvider {
             if (typeof c === 'number') { cacheTokens = c; }
         }
         const model = meta.resolvedModel || request?.modelId || '';
-        const aic = (inputTokens !== undefined || outputTokens !== undefined)
-            ? computeAic(inputTokens || 0, outputTokens || 0, cacheTokens, model)
-            : undefined;
+
+        // Prefer the ACTUAL billed credits Copilot records (nanoAiu) — this matches the
+        // number shown in Copilot's own usage view exactly. Only fall back to computing
+        // AIC from tokens × model price when Copilot didn't record a credit value.
+        const nanoAiu = this.extractNanoAiu(meta, request);
+        let aic: number | undefined;
+        if (nanoAiu !== undefined) {
+            aic = nanoAiu / NANO_AIU_PER_AIC;
+        } else if (inputTokens !== undefined || outputTokens !== undefined) {
+            aic = computeAic(inputTokens || 0, outputTokens || 0, cacheTokens, model);
+        }
         return {
             inputTokens,
             outputTokens,
             cacheTokens: cacheTokens || undefined,
             model,
             aic,
+            nanoAiu,
             requestId: request?.requestId,
             responseId: meta.responseId
         };
+    }
+
+    /** Best-effort read of the raw billed credits (nanoAiu) Copilot may record for a request. */
+    private extractNanoAiu(meta: any, request: any): number | undefined {
+        const candidates = [
+            meta?.copilotUsageNanoAiu, meta?.nanoAiu, meta?.nanoAiU,
+            meta?.usage?.copilotUsageNanoAiu, meta?.usage?.nanoAiu,
+            request?.copilotUsageNanoAiu, request?.nanoAiu
+        ];
+        for (const c of candidates) {
+            if (typeof c === 'number' && isFinite(c) && c >= 0) {
+                return c;
+            }
+        }
+        return undefined;
     }
 
     /** Extract assistant response text from a request stub (best-effort). */

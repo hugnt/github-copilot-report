@@ -15,6 +15,40 @@
  * of per-token AICs; those are represented with `multiplier`.
  */
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * MONEY CONVERSION — the single deciding knob for AIC → USD.
+ *
+ * GitHub Copilot's usage-based billing draws a customer's budget down at a FIXED
+ * rate of **1 AI credit = $0.01 USD** (a $10 budget covers 1,000 credits — see
+ * https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals).
+ *
+ * Change `DEFAULT_USD_PER_AIC` here to alter the rate for everyone, or override it
+ * live per-user via the `githubCopilotReport.usdPerAic` setting (loaded on refresh).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+export const DEFAULT_USD_PER_AIC = 0.01;
+
+/** Divisor that turns Copilot's raw `nanoAiu` metadata into whole AIC (1 AIC = 1e9 nanoAiu). */
+export const NANO_AIU_PER_AIC = 1_000_000_000;
+
+let usdPerAic = DEFAULT_USD_PER_AIC;
+
+/** Set the AIC→USD rate (from settings). Invalid / non-positive values reset to the default. */
+export function setUsdPerAic(rate: number | undefined | null): void {
+    usdPerAic = (typeof rate === 'number' && isFinite(rate) && rate > 0) ? rate : DEFAULT_USD_PER_AIC;
+}
+
+/** The AIC→USD rate currently in effect. */
+export function getUsdPerAic(): number {
+    return usdPerAic;
+}
+
+/** Convert AIC to USD using the current rate. Returns undefined when AIC is unknown. */
+export function computeUsd(aic: number | undefined): number | undefined {
+    return aic === undefined ? undefined : aic * usdPerAic;
+}
+
 export interface ModelPricing {
     /** AIC per 1,000,000 input (prompt) tokens. */
     inputCost?: number;
@@ -172,6 +206,20 @@ export function formatAic(aic: number | undefined): string {
         return aic.toFixed(2);
     }
     return aic.toFixed(1);
+}
+
+/** Format a USD amount for display (e.g. "$0.11", tiny values shown to 4 dp). */
+export function formatUsd(usd: number | undefined): string {
+    if (usd === undefined) {
+        return '—';
+    }
+    if (usd === 0) {
+        return '$0.00';
+    }
+    if (Math.abs(usd) < 0.01) {
+        return '$' + usd.toFixed(4);
+    }
+    return '$' + usd.toFixed(2);
 }
 
 /** Compact token formatter: 1234 -> "1.2k". */

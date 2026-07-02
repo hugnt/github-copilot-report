@@ -24,7 +24,13 @@
       "Bash(rm -f scratch_smoke2.js scratch_cols.xlsx)",
       "Bash(rm -f github-copilot-report-1.0.0.vsix)",
       "Bash(PYTHONIOENCODING=utf-8 node scratch_smoke3.js)",
-      "Bash(rm -f scratch_smoke3.js scratch_cols.xlsx github-copilot-report-1.1.0.vsix)"
+      "Bash(rm -f scratch_smoke3.js scratch_cols.xlsx github-copilot-report-1.1.0.vsix)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json)",
+      "PowerShell(if \\($?\\) { \"TYPECHECK OK\" })",
+      "PowerShell(npm run compile 2>&1)",
+      "Bash(npm init *)"
     ]
   }
 }

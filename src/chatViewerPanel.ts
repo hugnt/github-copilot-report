@@ -1,17 +1,17 @@
 import * as vscode from 'vscode';
 import { ChatSession, ChatMessage } from './chatHistoryProvider';
-import { formatTokens, formatAic, getModelDisplayName } from './modelPricing';
+import { formatTokens, formatAic, formatUsd, computeUsd, getModelDisplayName } from './modelPricing';
 
-/** Build a small token / AIC badge for a prompt that has usage metadata. */
+/** Build a small token / AIC / USD badge for a prompt that has usage metadata. */
 function usageBadge(msg: ChatMessage): string {
     const u = msg.usage;
     if (!u || (u.inputTokens === undefined && u.outputTokens === undefined)) {
         return '';
     }
     const model = getModelDisplayName(u.model);
-    const title = `Model: ${model} · Input: ${(u.inputTokens ?? 0).toLocaleString()} · Output: ${(u.outputTokens ?? 0).toLocaleString()} tokens`;
+    const title = `Model: ${model} · Input: ${(u.inputTokens ?? 0).toLocaleString()} · Output: ${(u.outputTokens ?? 0).toLocaleString()} tokens · ${formatAic(u.aic)} AIC ≈ ${formatUsd(computeUsd(u.aic))}`;
     return `<span class="usage-badge" title="${title.replace(/"/g, '&quot;')}">`
-        + `▲ ${formatTokens(u.inputTokens)} &nbsp; ▼ ${formatTokens(u.outputTokens)} &nbsp; · &nbsp; ${formatAic(u.aic)} AIC</span>`;
+        + `▲ ${formatTokens(u.inputTokens)} &nbsp; ▼ ${formatTokens(u.outputTokens)} &nbsp; · &nbsp; ${formatAic(u.aic)} AIC &nbsp; · &nbsp; ${formatUsd(computeUsd(u.aic))}</span>`;
 }
 
 /**

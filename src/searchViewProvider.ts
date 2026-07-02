@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ChatHistoryProvider, ChatMessage } from './chatHistoryProvider';
 import { FilterState, FilterMode } from './filterState';
-import { formatTokens, formatAic } from './modelPricing';
+import { formatTokens, formatAic, formatUsd, computeUsd } from './modelPricing';
 
 export class SearchViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'githubCopilotReport.searchView';
@@ -88,7 +88,8 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
             chats: s.chats,
             prompts: s.prompts,
             tokens: formatTokens(s.input + s.output),
-            aic: formatAic(s.aic) + (s.aicComplete ? '' : '+')
+            aic: formatAic(s.aic) + (s.aicComplete ? '' : '+'),
+            usd: formatUsd(computeUsd(s.aic)) + (s.aicComplete ? '' : '+')
         });
     }
 
@@ -143,6 +144,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
     .stat .num { font-size: 15px; font-weight: 600; color: var(--vscode-foreground); }
     .stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--vscode-descriptionForeground); }
     .stat .num.aic { color: var(--vscode-charts-green, #4ec9b0); }
+    .stat .num.usd { color: var(--vscode-charts-yellow, #d7ba7d); }
     .search-type-toggle { display: flex; margin-bottom: 6px; gap: 4px; }
     .search-type-btn {
         flex: 1; padding: 4px 8px; font-size: 11px;
@@ -199,6 +201,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
             <div class="stat"><span class="num" id="statPrompts">–</span><span class="lbl">Prompts</span></div>
             <div class="stat"><span class="num" id="statTokens">–</span><span class="lbl">Tokens</span></div>
             <div class="stat"><span class="num aic" id="statAic">–</span><span class="lbl">AIC</span></div>
+            <div class="stat"><span class="num usd" id="statUsd" title="Estimated cost — AIC × your usdPerAic rate (default 1 AIC = $0.01)">–</span><span class="lbl">USD (est.)</span></div>
         </div>
     </div>
 
@@ -271,6 +274,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
                 $('statPrompts').textContent = m.prompts;
                 $('statTokens').textContent = m.tokens;
                 $('statAic').textContent = m.aic;
+                $('statUsd').textContent = m.usd;
                 break;
             case 'results': displayResults(m.results, m.query); break;
             case 'sessionResults': displaySessionResults(m.sessions, m.query); break;

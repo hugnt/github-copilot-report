@@ -1,7 +1,7 @@
 import * as ExcelJS from 'exceljs';
 import { ChatSession } from './chatHistoryProvider';
 import { DateRange, isInRange } from './filterState';
-import { getModelDisplayName, normalizeModelId } from './modelPricing';
+import { getModelDisplayName, normalizeModelId, getUsdPerAic } from './modelPricing';
 
 interface PromptRow {
     date: Date;
@@ -15,6 +15,7 @@ interface PromptRow {
     outputTokens: number | null;
     totalTokens: number | null;
     aic: number | null;
+    usd: number | null;
 }
 
 /** A selectable column for the Prompts sheet. Single source of truth for the picker + the sheet. */
@@ -42,6 +43,7 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
     { id: 'model', header: 'Model', width: 18, defaultOn: true, detail: 'Model used', get: r => r.model },
     { id: 'prompt', header: 'Prompt', width: 60, defaultOn: true, detail: 'Your message text', get: r => r.prompt.replace(/\s+/g, ' ').trim() },
     { id: 'aic', header: 'AIC', width: 10, defaultOn: true, detail: 'AI Credits used', get: r => r.aic, numFmt: '0.00', sum: true },
+    { id: 'usd', header: 'USD (est.)', width: 12, defaultOn: true, detail: 'Estimated cost = AIC × rate', get: r => r.usd, numFmt: '$#,##0.0000', sum: true },
     { id: 'inputTokens', header: 'Input Tokens', width: 14, defaultOn: true, detail: 'Token · prompt (input)', get: r => r.inputTokens, numFmt: '#,##0', sum: true },
     { id: 'outputTokens', header: 'Output Tokens', width: 15, defaultOn: true, detail: 'Token · completion (output)', get: r => r.outputTokens, numFmt: '#,##0', sum: true },
     { id: 'totalTokens', header: 'Total Tokens', width: 14, defaultOn: true, detail: 'Token · input + output', get: r => r.totalTokens, numFmt: '#,##0', sum: true },
@@ -108,6 +110,7 @@ function buildData(sessions: ChatSession[], range: DateRange): BuiltData {
             const output = u && typeof u.outputTokens === 'number' ? u.outputTokens : null;
             const total = (input !== null || output !== null) ? (input || 0) + (output || 0) : null;
             const aic = u && typeof u.aic === 'number' ? u.aic : null;
+            const usd = aic !== null ? aic * getUsdPerAic() : null;
             const model = u?.model || '';
 
             const row: PromptRow = {
@@ -121,7 +124,8 @@ function buildData(sessions: ChatSession[], range: DateRange): BuiltData {
                 inputTokens: input,
                 outputTokens: output,
                 totalTokens: total,
-                aic
+                aic,
+                usd
             };
             rows.push(row);
             lastRow = row;
@@ -172,8 +176,10 @@ function styleHeader(row: ExcelJS.Row): void {
 }
 
 function buildSummarySheet(ws: ExcelJS.Worksheet, data: BuiltData, range: DateRange): void {
+    const rate = getUsdPerAic();
+    const usdOf = (aic: number) => Number((aic * rate).toFixed(4));
     ws.columns = [
-        { width: 26 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }
+        { width: 26 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 14 }
     ];
 
     const title = ws.addRow(['GitHub Copilot Usage Report']);
@@ -195,29 +201,36 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: BuiltData, range: DateRa
     const aicRow = ws.addRow(['AIC used' + plus, Number(data.totals.aic.toFixed(2))]);
     aicRow.getCell(1).font = { bold: true };
     aicRow.getCell(2).font = { bold: true };
+    const usdRow = ws.addRow(['USD (est.)' + plus, usdOf(data.totals.aic)]);
+    usdRow.getCell(1).font = { bold: true };
+    usdRow.getCell(2).font = { bold: true };
+    usdRow.getCell(2).numFmt = '$#,##0.0000';
+    ws.addRow(['Rate', `1 AIC = ${formatUsdRate(rate)} (githubCopilotReport.usdPerAic)`]);
     if (!data.totals.aicComplete) {
-        ws.addRow(['Note', '“(+)” = some prompts used a model with unknown pricing; AIC is a lower bound.']);
+        ws.addRow(['Note', '“(+)” = some prompts used a model with unknown pricing; AIC/USD is a lower bound.']);
     }
     ws.addRow([]);
 
     // By model table
-    const mHead = ws.addRow(['By Model', 'Prompts', 'Input', 'Output', 'AIC']);
+    const mHead = ws.addRow(['By Model', 'Prompts', 'Input', 'Output', 'AIC', 'USD (est.)']);
     styleHeader(mHead);
     const modelsSorted = Array.from(data.byModel.values()).sort((a, b) => b.aic - a.aic);
     for (const m of modelsSorted) {
-        ws.addRow([m.display, m.prompts, m.input, m.output, Number(m.aic.toFixed(2)) + (m.aicComplete ? 0 : 0)]);
+        const r = ws.addRow([m.display, m.prompts, m.input, m.output, Number(m.aic.toFixed(2)), usdOf(m.aic)]);
+        r.getCell(6).numFmt = '$#,##0.0000';
     }
     ws.addRow([]);
 
     // By day table
-    const dHead = ws.addRow(['By Day', 'Prompts', 'Input', 'Output', 'AIC']);
+    const dHead = ws.addRow(['By Day', 'Prompts', 'Input', 'Output', 'AIC', 'USD (est.)']);
     styleHeader(dHead);
     const daysSorted = Array.from(data.byDay.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     for (const [dk, d] of daysSorted) {
-        ws.addRow([dk, d.prompts, d.input, d.output, Number(d.aic.toFixed(2))]);
+        const r = ws.addRow([dk, d.prompts, d.input, d.output, Number(d.aic.toFixed(2)), usdOf(d.aic)]);
+        r.getCell(6).numFmt = '$#,##0.0000';
     }
 
-    // Number formats for token/aic columns (best-effort across the sheet).
+    // Number formats for token columns (best-effort across the sheet).
     ws.eachRow(row => {
         [2, 3, 4, 5].forEach(ci => {
             const cell = row.getCell(ci);
@@ -226,6 +239,11 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: BuiltData, range: DateRa
             }
         });
     });
+}
+
+/** Human-friendly rendering of the AIC→USD rate for the report header (e.g. "$0.01"). */
+function formatUsdRate(rate: number): string {
+    return '$' + (rate < 0.01 ? rate.toFixed(4) : rate.toFixed(2));
 }
 
 function colLetter(n: number): string {
@@ -269,6 +287,7 @@ function buildPromptsSheet(ws: ExcelJS.Worksheet, data: BuiltData, cols: ExportC
         else if (c.id === 'outputTokens') { totalValues[c.id] = data.totals.output; }
         else if (c.id === 'totalTokens') { totalValues[c.id] = data.totals.input + data.totals.output; }
         else if (c.id === 'aic') { totalValues[c.id] = Number(data.totals.aic.toFixed(2)); }
+        else if (c.id === 'usd') { totalValues[c.id] = Number((data.totals.aic * getUsdPerAic()).toFixed(4)); }
     }
     const totalRow = ws.addRow(totalValues);
     totalRow.font = { bold: true };
@@ -318,7 +337,9 @@ function cellToText(col: ExportColumn, v: any): string {
     if (v === null || v === undefined) { return ''; }
     if (v instanceof Date) { return fmtDateTime(v); }
     if (typeof v === 'number') {
-        return col.id === 'aic' ? v.toFixed(2) : String(v);
+        if (col.id === 'aic') { return v.toFixed(2); }
+        if (col.id === 'usd') { return v.toFixed(4); }
+        return String(v);
     }
     // Collapse tabs/newlines so each prompt stays in a single spreadsheet cell.
     return String(v).replace(/[\t\r\n]+/g, ' ').trim();
@@ -350,6 +371,7 @@ export function buildClipboardTsv(sessions: ChatSession[], range: DateRange, col
         if (c.id === 'outputTokens') { return String(data.totals.output); }
         if (c.id === 'totalTokens') { return String(data.totals.input + data.totals.output); }
         if (c.id === 'aic') { return data.totals.aic.toFixed(2); }
+        if (c.id === 'usd') { return (data.totals.aic * getUsdPerAic()).toFixed(4); }
         return '';
     });
     lines.push(totalCells.join('\t'));

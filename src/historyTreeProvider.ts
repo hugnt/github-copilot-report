@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ChatHistoryProvider, ChatSession, ChatMessage } from './chatHistoryProvider';
 import { DateRange, isInRange } from './filterState';
-import { formatTokens, formatAic, getModelDisplayName } from './modelPricing';
+import { formatTokens, formatAic, formatUsd, computeUsd, getModelDisplayName } from './modelPricing';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
@@ -180,7 +180,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
 
         // Summary header.
         const summary = new ChatTreeItem(`📊 ${this.range.label}`, vscode.TreeItemCollapsibleState.None);
-        summary.description = `${filtered.length} chats · ${totalPrompts} prompts · ${formatAic(totalAic)}${aicComplete ? '' : '+'} AIC`;
+        summary.description = `${filtered.length} chats · ${totalPrompts} prompts · ${formatAic(totalAic)}${aicComplete ? '' : '+'} AIC · ${formatUsd(computeUsd(totalAic))}`;
         summary.tooltip = new vscode.MarkdownString(
             `**${this.range.label}**\n\n` +
             `- Chats: **${filtered.length}**\n` +
@@ -188,7 +188,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             `- Input tokens: **${totalIn.toLocaleString()}**\n` +
             `- Output tokens: **${totalOut.toLocaleString()}**\n` +
             `- Total tokens: **${(totalIn + totalOut).toLocaleString()}**\n` +
-            `- AIC: **${formatAic(totalAic)}${aicComplete ? '' : '+'}**` +
+            `- AIC: **${formatAic(totalAic)}${aicComplete ? '' : '+'}**\n` +
+            `- Est. cost: **${formatUsd(computeUsd(totalAic))}${aicComplete ? '' : '+'}**` +
             (aicComplete ? '' : '\n\n_“+” means some prompts used a model with unknown pricing._')
         );
         summary.iconPath = new vscode.ThemeIcon('graph');
@@ -215,7 +216,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             const groupItem = new ChatTreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
             let gp = 0, ga = 0; let gComplete = true;
             for (const e of entries) { gp += e.stats.promptCount; ga += e.stats.aic; if (!e.stats.aicComplete) { gComplete = false; } }
-            groupItem.description = `${entries.length} chats · ${gp} prompts · ${formatAic(ga)}${gComplete ? '' : '+'} AIC`;
+            groupItem.description = `${entries.length} chats · ${gp} prompts · ${formatAic(ga)}${gComplete ? '' : '+'} AIC · ${formatUsd(computeUsd(ga))}`;
             groupItem.iconPath = new vscode.ThemeIcon('calendar');
             groupItem.contextValue = 'dateGroup';
             (groupItem as any).sessions = entries;
@@ -227,13 +228,14 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
     private makeSessionItem(session: ChatSession, stats: SessionStats): ChatTreeItem {
         const item = new ChatTreeItem(session.title, vscode.TreeItemCollapsibleState.Collapsed, session);
         const modelStr = session.models.length ? ' · ' + session.models.map(getModelDisplayName).join(', ') : '';
-        item.description = `${stats.promptCount} prompts · ${formatTokens(stats.inTok + stats.outTok)} tok · ${formatAic(stats.aic)}${stats.aicComplete ? '' : '+'} AIC`;
+        item.description = `${stats.promptCount} prompts · ${formatTokens(stats.inTok + stats.outTok)} tok · ${formatAic(stats.aic)}${stats.aicComplete ? '' : '+'} AIC · ${formatUsd(computeUsd(stats.aic))}`;
         item.tooltip = new vscode.MarkdownString(
             `**${session.title}**\n\n` +
             `- ${this.formatTimestamp(this.latestTs(stats))}${session.workspaceLabel ? ` · _${session.workspaceLabel}_` : ''}\n` +
             `- Prompts: **${stats.promptCount}**\n` +
             `- Input: **${stats.inTok.toLocaleString()}** · Output: **${stats.outTok.toLocaleString()}** tokens\n` +
-            `- AIC: **${formatAic(stats.aic)}${stats.aicComplete ? '' : '+'}**` +
+            `- AIC: **${formatAic(stats.aic)}${stats.aicComplete ? '' : '+'}**\n` +
+            `- Est. cost: **${formatUsd(computeUsd(stats.aic))}${stats.aicComplete ? '' : '+'}**` +
             (modelStr ? `\n- Models: ${session.models.map(getModelDisplayName).join(', ')}` : '')
         );
         item.iconPath = session.isArchived ? new vscode.ThemeIcon('archive') : new vscode.ThemeIcon('comment-discussion');
@@ -254,8 +256,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
         if (isUser && msg.usage) {
             const u = msg.usage;
             const total = (u.inputTokens || 0) + (u.outputTokens || 0);
-            // The token / AIC badge shown next to each prompt.
-            item.description = `▲${formatTokens(u.inputTokens)} ▼${formatTokens(u.outputTokens)} · ${formatAic(u.aic)} AIC`;
+            // The token / AIC / USD badge shown next to each prompt.
+            item.description = `▲${formatTokens(u.inputTokens)} ▼${formatTokens(u.outputTokens)} · ${formatAic(u.aic)} AIC · ${formatUsd(computeUsd(u.aic))}`;
             item.tooltip = new vscode.MarkdownString(
                 `**Prompt** · ${this.formatTimestamp(msg.timestamp)}\n\n` +
                 `${this.mdEscape(msg.content.substring(0, 400))}\n\n---\n` +
@@ -264,7 +266,8 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
                 `- Output tokens: **${(u.outputTokens ?? 0).toLocaleString()}**\n` +
                 (u.cacheTokens ? `- Cached tokens: **${u.cacheTokens.toLocaleString()}**\n` : '') +
                 `- Total tokens: **${total.toLocaleString()}**\n` +
-                `- AIC: **${formatAic(u.aic)}**`
+                `- AIC: **${formatAic(u.aic)}**${u.nanoAiu !== undefined ? ' _(actual)_' : ' _(est.)_'}\n` +
+                `- Est. cost: **${formatUsd(computeUsd(u.aic))}**`
             );
         } else if (isUser) {
             item.description = 'no usage data';
