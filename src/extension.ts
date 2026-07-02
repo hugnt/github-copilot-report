@@ -1,0 +1,340 @@
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
+import { ChatHistoryProvider, ChatMessage, ChatSession } from './chatHistoryProvider';
+import { HistoryTreeProvider } from './historyTreeProvider';
+import { SearchViewProvider } from './searchViewProvider';
+import { ChatViewerPanel } from './chatViewerPanel';
+import { FilterState, FilterMode } from './filterState';
+import { loadPricingOverrides } from './modelPricing';
+import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS } from './excelExport';
+
+const CONFIG_NS = 'githubCopilotReport';
+const EXPORT_COLS_KEY = 'githubCopilotReport.exportColumns';
+
+let extensionContext: vscode.ExtensionContext;
+let chatHistoryProvider: ChatHistoryProvider;
+let historyTreeProvider: HistoryTreeProvider;
+let searchViewProvider: SearchViewProvider;
+let filterState: FilterState;
+let stateDbWatchers: fs.FSWatcher[] = [];
+let refreshDebounceTimer: NodeJS.Timeout | null = null;
+let lastRefreshTime = 0;
+
+export function activate(context: vscode.ExtensionContext) {
+    console.log('Github Copilot Report is now active');
+    extensionContext = context;
+
+    const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
+    loadPricingOverrides(cfg.get<Record<string, any>>('modelPricing', {}));
+    const defaultFilter = cfg.get<FilterMode>('defaultFilter', 'month');
+
+    chatHistoryProvider = new ChatHistoryProvider();
+    filterState = new FilterState(defaultFilter);
+    historyTreeProvider = new HistoryTreeProvider(chatHistoryProvider, filterState.range);
+    searchViewProvider = new SearchViewProvider(context.extensionUri, chatHistoryProvider, filterState);
+
+    const treeView = vscode.window.createTreeView('githubCopilotReport.historyView', {
+        treeDataProvider: historyTreeProvider,
+        showCollapseAll: true
+    });
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('githubCopilotReport.searchView', searchViewProvider)
+    );
+
+    // React to filter changes: re-render tree + webview stats.
+    context.subscriptions.push(
+        filterState.onDidChange(range => {
+            historyTreeProvider.setRange(range);
+            searchViewProvider.updateFilterStats();
+        })
+    );
+
+    registerCommands(context);
+
+    // Initial index.
+    vscode.window.withProgress(
+        { location: { viewId: 'githubCopilotReport.historyView' }, title: 'Indexing Copilot chats…' },
+        async () => {
+            await chatHistoryProvider.refresh();
+            historyTreeProvider.refresh();
+            searchViewProvider.updateFilterStats();
+            setupStateDbWatchers();
+        }
+    );
+
+    context.subscriptions.push(treeView, filterState, {
+        dispose: () => cleanupWatchers()
+    });
+}
+
+function registerCommands(context: vscode.ExtensionContext) {
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.refresh', async () => {
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Window, title: 'Refreshing Copilot report…' },
+                async () => {
+                    await chatHistoryProvider.refresh();
+                    historyTreeProvider.refresh();
+                    searchViewProvider.updateFilterStats();
+                }
+            );
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.setFilter', async () => {
+            const picked = await vscode.window.showQuickPick(
+                [
+                    { label: '$(calendar) This Month', mode: 'month' as FilterMode, description: 'Current calendar month' },
+                    { label: '$(calendar) This Week', mode: 'week' as FilterMode, description: 'Monday – Sunday of the current week' },
+                    { label: '$(infinity) All time', mode: 'all' as FilterMode, description: 'Every chat' }
+                ],
+                { placeHolder: `Current: ${filterState.range.label}` }
+            );
+            if (picked) {
+                filterState.setMode(picked.mode);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.exportExcel', () => exportCurrentFilter())
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.copyToClipboard', () => copyCurrentFilter())
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.search', async () => {
+            const query = await vscode.window.showInputBox({
+                prompt: 'Search Copilot chat history',
+                placeHolder: 'Enter a search term'
+            });
+            if (!query) { return; }
+            const results = chatHistoryProvider.search(query);
+            if (results.length === 0) {
+                vscode.window.showInformationMessage(`No results found for "${query}"`);
+                return;
+            }
+            historyTreeProvider.showSearchResults(results);
+            const items = results.map(r => ({
+                label: `$(comment) ${r.preview.substring(0, 80)}`,
+                description: new Date(r.timestamp).toLocaleString(),
+                detail: `${r.role}${r.usage ? ` · ${r.usage.inputTokens ?? '?'} in / ${r.usage.outputTokens ?? '?'} out` : ''}`,
+                message: r
+            }));
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: `${results.length} results`,
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+            if (selected) {
+                vscode.commands.executeCommand('githubCopilotReport.openChat', selected.message);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.clearSearch', () => {
+            historyTreeProvider.clearSearch();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.openChat', async (msg: ChatMessage) => {
+            if (!msg) { return; }
+            const session = chatHistoryProvider.getSessionByMessage(msg);
+            if (session) {
+                ChatViewerPanel.show(session, msg);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.openSession', async (session: ChatSession) => {
+            if (!session || !session.messages || session.messages.length === 0) {
+                vscode.window.showWarningMessage('This chat has no messages to display');
+                return;
+            }
+            ChatViewerPanel.show(session);
+        })
+    );
+}
+
+async function exportCurrentFilter(): Promise<void> {
+    const range = filterState.range;
+    const sessions = chatHistoryProvider.getSessions();
+    const summary = chatHistoryProvider.getRangeSummary(range.start, range.end);
+
+    if (summary.prompts === 0) {
+        vscode.window.showWarningMessage(`No prompts found for "${range.label}". Nothing to export.`);
+        return;
+    }
+
+    // Let the user tick which columns to export (necessary fields pre-selected & remembered).
+    const columnIds = await pickExportColumns();
+    if (!columnIds) {
+        return; // cancelled
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const defaultName = `copilot-report-${range.mode}-${stamp}.xlsx`;
+    const defaultDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+
+    const uri = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(path.join(defaultDir, defaultName)),
+        filters: { 'Excel Workbook': ['xlsx'] },
+        saveLabel: 'Export Copilot Report'
+    });
+    if (!uri) { return; }
+
+    try {
+        const count = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Exporting ${summary.prompts} prompts to Excel…` },
+            async () => exportToExcel(sessions, range, uri.fsPath, columnIds)
+        );
+        const choice = await vscode.window.showInformationMessage(
+            `Exported ${count} prompts (${range.label}) to Excel.`,
+            'Open File', 'Reveal in Folder'
+        );
+        if (choice === 'Open File') {
+            vscode.env.openExternal(uri);
+        } else if (choice === 'Reveal in Folder') {
+            vscode.commands.executeCommand('revealFileInOS', uri);
+        }
+    } catch (err: any) {
+        vscode.window.showErrorMessage(`Excel export failed: ${err?.message || err}`);
+        console.error('[CopilotReport] Excel export error:', err);
+    }
+}
+
+/** Copy the current-filter table to the clipboard as TSV (paste straight into Excel/Sheets). */
+async function copyCurrentFilter(): Promise<void> {
+    const range = filterState.range;
+    const summary = chatHistoryProvider.getRangeSummary(range.start, range.end);
+    if (summary.prompts === 0) {
+        vscode.window.showWarningMessage(`No prompts found for "${range.label}". Nothing to copy.`);
+        return;
+    }
+    const columnIds = getSavedColumns();
+    const { text, rows, columns } = buildClipboardTsv(chatHistoryProvider.getSessions(), range, columnIds);
+    await vscode.env.clipboard.writeText(text);
+    vscode.window.showInformationMessage(
+        `Copied ${rows} prompts × ${columns} columns (${range.label}) — paste into Excel or Google Sheets.`
+    );
+}
+
+/** The saved export/copy column selection, falling back to the necessary defaults. */
+function getSavedColumns(): string[] {
+    const saved = extensionContext.globalState.get<string[]>(EXPORT_COLS_KEY, DEFAULT_EXPORT_COLUMN_IDS);
+    return saved && saved.length ? saved : DEFAULT_EXPORT_COLUMN_IDS;
+}
+
+/**
+ * Show a multi-select picker of export columns. The "necessary" fields are pre-ticked and
+ * the last choice is remembered. Returns the selected column ids (canonical order) or
+ * undefined if the user cancelled.
+ */
+async function pickExportColumns(): Promise<string[] | undefined> {
+    const savedSet = new Set(getSavedColumns());
+
+    interface ColItem extends vscode.QuickPickItem { id: string; }
+    const items: ColItem[] = EXPORT_COLUMNS.map(c => ({
+        id: c.id,
+        label: c.header,
+        detail: c.detail,
+        picked: savedSet.has(c.id)
+    }));
+
+    const picked = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        title: 'Export to Excel — choose columns',
+        placeHolder: 'Tick the fields to include (Space to toggle, Enter to confirm)'
+    }) as ColItem[] | undefined;
+
+    if (!picked) {
+        return undefined; // cancelled
+    }
+    if (picked.length === 0) {
+        vscode.window.showWarningMessage('Select at least one column to export.');
+        return undefined;
+    }
+
+    // Preserve the canonical column order from EXPORT_COLUMNS.
+    const pickedSet = new Set(picked.map(p => p.id));
+    const ordered = EXPORT_COLUMNS.filter(c => pickedSet.has(c.id)).map(c => c.id);
+    await extensionContext.globalState.update(EXPORT_COLS_KEY, ordered);
+    return ordered;
+}
+
+/** Watch state.vscdb files so the report auto-refreshes as you chat. */
+function setupStateDbWatchers(): void {
+    cleanupWatchers();
+    const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
+    const custom = cfg.get<string>('storagePath', '');
+    const base = custom && custom.trim()
+        ? (custom.startsWith('~') ? path.join(os.homedir(), custom.slice(1)) : custom)
+        : platformDefaultStorage();
+    const workspaceStoragePath = path.join(base, 'workspaceStorage');
+    if (!fs.existsSync(workspaceStoragePath)) { return; }
+
+    try {
+        for (const workspace of fs.readdirSync(workspaceStoragePath)) {
+            const stateDbPath = path.join(workspaceStoragePath, workspace, 'state.vscdb');
+            if (!fs.existsSync(stateDbPath)) { continue; }
+            try {
+                const watcher = fs.watch(stateDbPath, () => scheduleRefresh());
+                stateDbWatchers.push(watcher);
+            } catch { /* ignore unwatchable files */ }
+        }
+        console.log(`[CopilotReport] Watching ${stateDbWatchers.length} state.vscdb files`);
+    } catch (err) {
+        console.error('[CopilotReport] Error setting up watchers:', err);
+    }
+}
+
+function scheduleRefresh(): void {
+    const now = Date.now();
+    if (now - lastRefreshTime < 500) { return; }
+    if (refreshDebounceTimer) { clearTimeout(refreshDebounceTimer); }
+    refreshDebounceTimer = setTimeout(async () => {
+        lastRefreshTime = Date.now();
+        try {
+            await chatHistoryProvider.refresh();
+            historyTreeProvider.refresh();
+            searchViewProvider.updateFilterStats();
+        } catch (err) {
+            console.error('[CopilotReport] Auto-refresh failed:', err);
+        }
+    }, 800);
+}
+
+function platformDefaultStorage(): string {
+    const homeDir = os.homedir();
+    if (process.platform === 'darwin') {
+        return path.join(homeDir, 'Library', 'Application Support', 'Code', 'User');
+    } else if (process.platform === 'win32') {
+        return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
+    }
+    return path.join(homeDir, '.config', 'Code', 'User');
+}
+
+function cleanupWatchers(): void {
+    for (const w of stateDbWatchers) {
+        try { w.close(); } catch { /* ignore */ }
+    }
+    stateDbWatchers = [];
+    if (refreshDebounceTimer) {
+        clearTimeout(refreshDebounceTimer);
+        refreshDebounceTimer = null;
+    }
+}
+
+export function deactivate() {
+    cleanupWatchers();
+    console.log('Github Copilot Report deactivated');
+}

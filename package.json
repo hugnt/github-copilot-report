@@ -1,0 +1,183 @@
+{
+  "name": "github-copilot-report",
+  "displayName": "Github Copilot Report",
+  "description": "Browse your GitHub Copilot chat history with per-prompt token & AIC usage, filter by week/month, and export a detailed Excel report.",
+  "version": "1.2.0",
+  "publisher": "nashtech",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Visualization"
+  ],
+  "keywords": [
+    "copilot",
+    "chat",
+    "history",
+    "report",
+    "token",
+    "aic",
+    "usage",
+    "excel",
+    "export"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "githubCopilotReport.refresh",
+        "title": "Copilot Report: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "githubCopilotReport.exportExcel",
+        "title": "Copilot Report: Export to Excel",
+        "icon": "$(export)"
+      },
+      {
+        "command": "githubCopilotReport.copyToClipboard",
+        "title": "Copilot Report: Copy Table to Clipboard",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "githubCopilotReport.setFilter",
+        "title": "Copilot Report: Change Time Filter",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "githubCopilotReport.search",
+        "title": "Copilot Report: Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "githubCopilotReport.openSession",
+        "title": "Open Chat Session"
+      },
+      {
+        "command": "githubCopilotReport.openChat",
+        "title": "Open Chat Message"
+      },
+      {
+        "command": "githubCopilotReport.clearSearch",
+        "title": "Clear Search"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "github-copilot-report",
+          "title": "Copilot Report",
+          "icon": "media/report.svg"
+        }
+      ]
+    },
+    "views": {
+      "github-copilot-report": [
+        {
+          "id": "githubCopilotReport.searchView",
+          "name": "Filter & Search",
+          "type": "webview"
+        },
+        {
+          "id": "githubCopilotReport.historyView",
+          "name": "Recent Chats"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "githubCopilotReport.search",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "githubCopilotReport.copyToClipboard",
+          "when": "view == githubCopilotReport.historyView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "githubCopilotReport.exportExcel",
+          "when": "view == githubCopilotReport.historyView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "githubCopilotReport.setFilter",
+          "when": "view == githubCopilotReport.historyView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "githubCopilotReport.refresh",
+          "when": "view == githubCopilotReport.historyView",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Github Copilot Report",
+      "properties": {
+        "githubCopilotReport.storagePath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the VS Code User storage folder. Leave empty to use the platform default:\n• macOS: ~/Library/Application Support/Code/User\n• Windows: %APPDATA%\\Code\\User\n• Linux: ~/.config/Code/User"
+        },
+        "githubCopilotReport.maxResults": {
+          "type": "number",
+          "default": 200,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Maximum number of search results to display."
+        },
+        "githubCopilotReport.fuzzyThreshold": {
+          "type": "number",
+          "default": 0.4,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fuzzy search threshold (0 = exact match, 1 = match anything)."
+        },
+        "githubCopilotReport.defaultFilter": {
+          "type": "string",
+          "enum": [
+            "month",
+            "week",
+            "all"
+          ],
+          "default": "month",
+          "description": "Default time range applied to the tree and Excel export when the extension starts."
+        },
+        "githubCopilotReport.modelPricing": {
+          "type": "object",
+          "default": {},
+          "description": "Override / add AIC pricing per model. Keys are normalized model ids (e.g. \"claude-sonnet-4.6\"), values are objects: { \"inputCost\": 300, \"outputCost\": 1500, \"cacheCost\": 30 } expressed in AIC per 1,000,000 tokens."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --production",
+    "compile": "npm run esbuild-base",
+    "esbuild-base": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "fuse.js": "^7.0.0"
+  }
+}

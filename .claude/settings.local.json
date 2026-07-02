@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(npm --version)",
+      "Bash(npm ping *)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"=== EXIT: $? ===\")",
+      "Bash(node esbuild.js)",
+      "Bash(npx esbuild *)",
+      "Bash(node -e ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 node scratch_verify.js)",
+      "Bash(PYTHONIOENCODING=utf-8 node scratch_smoke.js)",
+      "Bash(sed -i \"s/getConfiguration: \\(\\) => \\({ get: \\(k, d\\) => d }\\)/getConfiguration: \\(\\) => \\({ get: \\(k, d\\) => \\(k === 'defaultFilter' ? 'all' : d\\) }\\)/\" scratch_smoke.js)",
+      "Bash(PYTHONIOENCODING=utf-8 node -e ' *)",
+      "Bash(rm -f scratch_modelPricing.js scratch_verify.js scratch_smoke.js scratch_report.xlsx scratch_smoke_report.xlsx)",
+      "Bash(node esbuild.js --production)",
+      "Bash(npx --yes @vscode/vsce package --allow-missing-repository)",
+      "Bash(rm -rf out github-copilot-report-1.0.0.vsix)",
+      "Bash(npm run *)",
+      "Bash(PYTHONIOENCODING=utf-8 node scratch_smoke2.js)",
+      "Bash(rm -f scratch_smoke2.js scratch_cols.xlsx)",
+      "Bash(rm -f github-copilot-report-1.0.0.vsix)",
+      "Bash(PYTHONIOENCODING=utf-8 node scratch_smoke3.js)",
+      "Bash(rm -f scratch_smoke3.js scratch_cols.xlsx github-copilot-report-1.1.0.vsix)"
+    ]
+  }
+}

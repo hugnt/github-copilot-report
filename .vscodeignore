@@ -1,0 +1,13 @@
+.vscode/**
+.claude/**
+node_modules/**
+src/**
+scratch_*
+scratchpad/**
+**/*.ts
+**/*.map
+*.vsix
+.gitignore
+.gitattributes
+esbuild.js
+tsconfig.json
