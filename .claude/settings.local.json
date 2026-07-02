@@ -30,7 +30,9 @@
       "PowerShell(npx tsc --noEmit -p tsconfig.json)",
       "PowerShell(if \\($?\\) { \"TYPECHECK OK\" })",
       "PowerShell(npm run compile 2>&1)",
-      "Bash(npm init *)"
+      "Bash(npm init *)",
+      "Bash(unzip -l github-copilot-report-1.2.0.vsix)",
+      "Bash(sort -k1 -n -r)"
     ]
   }
 }
