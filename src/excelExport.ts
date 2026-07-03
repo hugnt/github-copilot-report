@@ -207,7 +207,7 @@ function buildSummarySheet(ws: ExcelJS.Worksheet, data: BuiltData, range: DateRa
     usdRow.getCell(2).numFmt = '$#,##0.0000';
     ws.addRow(['Rate', `1 AIC = ${formatUsdRate(rate)} (githubCopilotReport.usdPerAic)`]);
     if (!data.totals.aicComplete) {
-        ws.addRow(['Note', '“(+)” = some prompts used a model with unknown pricing; AIC/USD is a lower bound.']);
+        ws.addRow(['Note', '“(+)” = some prompts have no billed-credit data recorded yet; AIC/USD is a lower bound.']);
     }
     ws.addRow([]);
 

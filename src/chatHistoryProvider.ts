@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import Fuse from 'fuse.js';
-import { registerModelPricing, computeAic, normalizeModelId, setUsdPerAic, DEFAULT_USD_PER_AIC, NANO_AIU_PER_AIC } from './modelPricing';
+import { registerModelDisplayName, normalizeModelId, setUsdPerAic, DEFAULT_USD_PER_AIC, NANO_AIU_PER_AIC } from './modelPricing';
 
 const CONFIG_NS = 'githubCopilotReport';
 
@@ -89,7 +89,7 @@ export interface PromptUsage {
     outputTokens?: number;  // completion tokens produced
     cacheTokens?: number;   // cached input tokens (billed at cache rate)
     model?: string;         // raw model id (e.g. "copilot/claude-sonnet-4.6")
-    aic?: number;           // AI Credits — actual (from nanoAiu) if available, else computed
+    aic?: number;           // AI Credits actually billed by Copilot (from nanoAiu); undefined if not recorded
     nanoAiu?: number;       // raw billed credits Copilot recorded (set only when present)
     requestId?: string;
     responseId?: string;
@@ -127,7 +127,7 @@ export interface ChatSession {
     totalInputTokens: number;
     totalOutputTokens: number;
     totalAic: number;
-    aicComplete: boolean;   // false if some prompts had unknown pricing
+    aicComplete: boolean;   // false if some prompts have no billed-credit data recorded
     models: string[];       // distinct model display ids used
 }
 
@@ -160,18 +160,9 @@ export class ChatHistoryProvider {
         this.allCachedSessionIds.clear();
         this.workspaceLabels.clear();
 
-        // Load pricing overrides from settings each refresh.
-        const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
         // The AIC→USD rate (deciding money knob). Changing the setting takes effect on refresh.
+        const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
         setUsdPerAic(cfg.get<number>('usdPerAic', DEFAULT_USD_PER_AIC));
-        const overrides = cfg.get<Record<string, any>>('modelPricing', {});
-        if (overrides && typeof overrides === 'object') {
-            for (const [id, p] of Object.entries(overrides)) {
-                if (p && typeof p === 'object') {
-                    registerModelPricing(id, p as any);
-                }
-            }
-        }
 
         const vscodePath = this.getVSCodeStoragePath();
         console.log('[CopilotReport] Refresh, storage path:', vscodePath);
@@ -328,12 +319,17 @@ export class ChatHistoryProvider {
         }
     }
 
-    /** Detect embedded model definitions (with pricing) and register them dynamically. */
-    private detectPricingInLine(rawLine: string): void {
+    /**
+     * Detect embedded model definitions in the raw session data and register their friendly
+     * display name dynamically, so new models are picked up without waiting for a code update.
+     * Purely cosmetic — has no bearing on AIC, which always comes from `extractNanoAiu()`.
+     */
+    private detectModelNamesInLine(rawLine: string): void {
         if (rawLine.indexOf('"inputCost"') === -1) {
             return;
         }
-        // Cheap balanced-brace scan around each inputCost occurrence.
+        // Cheap balanced-brace scan around each inputCost occurrence (a marker that the
+        // enclosing object is a model definition record carrying a friendly `name`).
         let searchFrom = 0;
         while (true) {
             const idx = rawLine.indexOf('"inputCost"', searchFrom);
@@ -358,13 +354,8 @@ export class ChatHistoryProvider {
             try {
                 const obj = JSON.parse(rawLine.substring(start, end));
                 const id = obj.version || obj.id || obj.family || obj.name;
-                if (id && typeof obj.inputCost === 'number') {
-                    registerModelPricing(String(id), {
-                        inputCost: obj.inputCost,
-                        outputCost: obj.outputCost,
-                        cacheCost: obj.cacheCost,
-                        displayName: obj.name
-                    });
+                if (id && obj.name) {
+                    registerModelDisplayName(String(id), obj.name);
                 }
             } catch { /* ignore malformed slice */ }
         }
@@ -405,16 +396,11 @@ export class ChatHistoryProvider {
         }
         const model = meta.resolvedModel || request?.modelId || '';
 
-        // Prefer the ACTUAL billed credits Copilot records (nanoAiu) — this matches the
-        // number shown in Copilot's own usage view exactly. Only fall back to computing
-        // AIC from tokens × model price when Copilot didn't record a credit value.
+        // AIC comes exclusively from the credits Copilot actually billed for this request
+        // (nanoAiu) — matching ailmind/github-copilot-chat-usage. There is no token × price
+        // estimate: if Copilot didn't record a credit value, AIC is left undefined ("—").
         const nanoAiu = this.extractNanoAiu(meta, request, resultDetails);
-        let aic: number | undefined;
-        if (nanoAiu !== undefined) {
-            aic = nanoAiu / NANO_AIU_PER_AIC;
-        } else if (inputTokens !== undefined || outputTokens !== undefined) {
-            aic = computeAic(inputTokens || 0, outputTokens || 0, cacheTokens, model);
-        }
+        const aic = nanoAiu !== undefined ? nanoAiu / NANO_AIU_PER_AIC : undefined;
         return {
             inputTokens,
             outputTokens,
@@ -427,31 +413,26 @@ export class ChatHistoryProvider {
         };
     }
 
-    /** Best-effort read of the raw billed credits Copilot may record for a request, normalized to nanoAiu. */
+    /**
+     * Read the raw billed credits Copilot recorded for a request, normalized to nanoAiu.
+     * Field order and fallback mirror ailmind/github-copilot-chat-usage's
+     * `getChatRequestNanoAiu()` / `parseCreditDetailsNanoAiu()`.
+     */
     private extractNanoAiu(meta: any, request: any, resultDetails?: unknown): number | undefined {
+        const usage = meta?.usage ?? request?.usage;
         const candidates = [
+            request?.copilotUsageNanoAiu, request?.nanoAiu, request?.nanoAiU,
             meta?.copilotUsageNanoAiu, meta?.nanoAiu, meta?.nanoAiU,
-            meta?.usage?.copilotUsageNanoAiu, meta?.usage?.nanoAiu,
-            request?.copilotUsageNanoAiu, request?.nanoAiu
+            usage?.copilotUsageNanoAiu, usage?.nanoAiu, usage?.nanoAiU
         ];
         for (const c of candidates) {
-            if (typeof c === 'number' && isFinite(c) && c >= 0) {
+            if (typeof c === 'number' && isFinite(c)) {
                 return c;
             }
         }
         // Copilot's human-readable usage line — e.g. "Raptor mini • 2.0 credits" — is written
-        // to `result.details` once billing is fully reconciled. It's more reliable than the
-        // `copilotCredits` number on the request record, which is an early estimate that we've
-        // observed staying stuck at a much smaller provisional value (e.g. 0.13 vs. the final 1.96).
-        const fromDetails = this.parseCreditsFromDetails(resultDetails ?? request?.result?.details);
-        if (fromDetails !== undefined) {
-            return fromDetails;
-        }
-        const credits = request?.copilotCredits ?? meta?.copilotCredits;
-        if (typeof credits === 'number' && isFinite(credits) && credits >= 0) {
-            return credits * NANO_AIU_PER_AIC;
-        }
-        return undefined;
+        // to `result.details` once billing is fully reconciled.
+        return this.parseCreditsFromDetails(resultDetails ?? request?.result?.details);
     }
 
     /** Parse "... 2.0 credits" out of Copilot's free-text usage summary. */
@@ -459,12 +440,12 @@ export class ChatHistoryProvider {
         if (typeof detailsValue !== 'string') {
             return undefined;
         }
-        const match = detailsValue.match(/(\d+(?:\.\d+)?)\s+(?:ai\s+)?credits?\b/i);
+        const match = detailsValue.match(/(?:^|[^\d.])(\d+(?:\.\d+)?)\s+(?:ai\s+)?credits?\b/i);
         if (!match) {
             return undefined;
         }
         const credits = Number(match[1]);
-        return isFinite(credits) ? credits * NANO_AIU_PER_AIC : undefined;
+        return isFinite(credits) ? Math.round(credits * NANO_AIU_PER_AIC) : undefined;
     }
 
     /** Extract assistant response text from a request stub (best-effort). */
@@ -577,8 +558,8 @@ export class ChatHistoryProvider {
                     usages[currentIdx] = this.buildUsageFromMeta(meta, requestRecs[currentIdx], v?.details);
                 }
 
-                // Dynamic pricing detection.
-                this.detectPricingInLine(rawLine);
+                // Dynamic model display-name detection.
+                this.detectModelNamesInLine(rawLine);
             };
 
             for (const line of lines) {

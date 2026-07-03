@@ -7,7 +7,6 @@ import { HistoryTreeProvider } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
 import { ChatViewerPanel } from './chatViewerPanel';
 import { FilterState, FilterMode, MONTHS } from './filterState';
-import { loadPricingOverrides } from './modelPricing';
 import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS } from './excelExport';
 
 const CONFIG_NS = 'githubCopilotReport';
@@ -27,7 +26,6 @@ export function activate(context: vscode.ExtensionContext) {
     extensionContext = context;
 
     const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
-    loadPricingOverrides(cfg.get<Record<string, any>>('modelPricing', {}));
     const defaultFilter = cfg.get<FilterMode>('defaultFilter', 'month');
 
     chatHistoryProvider = new ChatHistoryProvider();

@@ -192,7 +192,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             `- Total tokens: **${(totalIn + totalOut).toLocaleString()}**\n` +
             `- AIC: **${formatAic(totalAic)}${aicComplete ? '' : '+'}**\n` +
             `- Est. cost: **${formatUsd(computeUsd(totalAic))}${aicComplete ? '' : '+'}**` +
-            (aicComplete ? '' : '\n\n_“+” means some prompts used a model with unknown pricing._')
+            (aicComplete ? '' : '\n\n_“+” means some prompts have no billed-credit data recorded yet._')
         );
         summary.iconPath = new vscode.ThemeIcon('graph');
         summary.contextValue = 'summary';
@@ -270,7 +270,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
                 `- Output tokens: **${(u.outputTokens ?? 0).toLocaleString()}**\n` +
                 (u.cacheTokens ? `- Cached tokens: **${u.cacheTokens.toLocaleString()}**\n` : '') +
                 `- Total tokens: **${total.toLocaleString()}**\n` +
-                `- AIC: **${formatAic(u.aic)}**${u.nanoAiu !== undefined ? ' _(actual)_' : ' _(est.)_'}\n` +
+                `- AIC: **${formatAic(u.aic)}**\n` +
                 `- Est. cost: **${formatUsd(computeUsd(u.aic))}**`
             );
         } else if (isUser) {
