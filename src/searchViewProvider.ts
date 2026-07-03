@@ -53,6 +53,12 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
                 case 'setFilter':
                     this.filterState.setMode(data.mode as FilterMode);
                     break;
+                case 'setCustomRange':
+                    this.filterState.setCustomRange(data.start, data.end);
+                    break;
+                case 'setPickedMonth':
+                    this.filterState.setPickedMonth(data.year, data.month);
+                    break;
                 case 'export':
                     vscode.commands.executeCommand('githubCopilotReport.exportExcel');
                     break;
@@ -118,6 +124,24 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
         color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
         font-size: 12px; cursor: pointer;
     }
+    .custom-filter-bar { display: none; gap: 6px; margin-bottom: 8px; align-items: center; }
+    .custom-filter-bar.visible { display: flex; }
+    .date-input, .month-input, .year-input {
+        padding: 5px 6px; border-radius: 4px;
+        border: 1px solid var(--vscode-input-border);
+        background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+        font-size: 12px;
+    }
+    .date-input { flex: 1; min-width: 0; }
+    .month-input { flex: 1.4; min-width: 0; }
+    .year-input { flex: 0.8; min-width: 0; }
+    .range-sep { font-size: 11px; color: var(--vscode-descriptionForeground); }
+    .apply-btn {
+        padding: 5px 10px; border: none; border-radius: 4px;
+        background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+        cursor: pointer; font-size: 12px; white-space: nowrap;
+    }
+    .apply-btn:hover { background: var(--vscode-button-hoverBackground); }
     .export-btn {
         display: flex; align-items: center; gap: 6px; justify-content: center;
         padding: 6px 10px; border: none; border-radius: 4px;
@@ -188,10 +212,25 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
         <select class="filter-select" id="filterSelect" title="Time range">
             <option value="month">📅 This Month</option>
             <option value="week">🗓️ This Week</option>
+            <option value="pickedMonth">🗓️ Pick Month…</option>
+            <option value="range">📆 Custom Range…</option>
             <option value="all">♾️ All time</option>
         </select>
         <button class="copy-btn" id="copyBtn" title="Copy the filtered table to the clipboard (paste into Excel / Google Sheets)">📋 Copy</button>
         <button class="export-btn" id="exportBtn" title="Export the filtered data to an Excel file">⬇ Excel</button>
+    </div>
+
+    <div class="custom-filter-bar" id="rangeBar">
+        <input type="date" class="date-input" id="rangeFrom" title="From date">
+        <span class="range-sep">to</span>
+        <input type="date" class="date-input" id="rangeTo" title="To date">
+        <button class="apply-btn" id="applyRangeBtn">Apply</button>
+    </div>
+
+    <div class="custom-filter-bar" id="monthBar">
+        <select class="month-input" id="monthSelect" title="Month"></select>
+        <input type="number" class="year-input" id="yearInput" title="Year" min="2000" max="2100">
+        <button class="apply-btn" id="applyMonthBtn">Apply</button>
     </div>
 
     <div class="stat-card">
@@ -230,9 +269,60 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
     const titleBtn = $('titleSearchBtn');
     let debounceTimer; let searchType = 'content';
 
-    $('filterSelect').addEventListener('change', e => {
-        vscode.postMessage({ type: 'setFilter', mode: e.target.value });
+    const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const rangeBar = $('rangeBar');
+    const monthBar = $('monthBar');
+    const monthSelect = $('monthSelect');
+    const yearInput = $('yearInput');
+
+    MONTH_NAMES.forEach((name, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = name;
+        monthSelect.appendChild(opt);
     });
+
+    function hideCustomBars() {
+        rangeBar.classList.remove('visible');
+        monthBar.classList.remove('visible');
+    }
+
+    $('filterSelect').addEventListener('change', e => {
+        const mode = e.target.value;
+        if (mode === 'range') {
+            hideCustomBars();
+            const today = new Date().toISOString().slice(0, 10);
+            if (!$('rangeFrom').value) { $('rangeFrom').value = today; }
+            if (!$('rangeTo').value) { $('rangeTo').value = today; }
+            rangeBar.classList.add('visible');
+            return;
+        }
+        if (mode === 'pickedMonth') {
+            hideCustomBars();
+            const now = new Date();
+            monthSelect.value = String(now.getMonth());
+            yearInput.value = String(now.getFullYear());
+            monthBar.classList.add('visible');
+            return;
+        }
+        hideCustomBars();
+        vscode.postMessage({ type: 'setFilter', mode });
+    });
+
+    $('applyRangeBtn').addEventListener('click', () => {
+        const fromVal = $('rangeFrom').value;
+        const toVal = $('rangeTo').value;
+        if (!fromVal || !toVal) { return; }
+        const start = new Date(fromVal + 'T00:00:00').getTime();
+        const end = new Date(toVal + 'T23:59:59.999').getTime();
+        if (end < start) { return; }
+        vscode.postMessage({ type: 'setCustomRange', start, end });
+    });
+
+    $('applyMonthBtn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'setPickedMonth', year: Number(yearInput.value), month: Number(monthSelect.value) });
+    });
+
     $('exportBtn').addEventListener('click', () => vscode.postMessage({ type: 'export' }));
     $('copyBtn').addEventListener('click', () => vscode.postMessage({ type: 'copy' }));
     $('refreshBtn').addEventListener('click', () => {
@@ -269,6 +359,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
         switch (m.type) {
             case 'filterStats':
                 $('filterSelect').value = m.mode;
+                hideCustomBars();
                 $('statPeriod').textContent = m.label;
                 $('statChats').textContent = m.chats;
                 $('statPrompts').textContent = m.prompts;

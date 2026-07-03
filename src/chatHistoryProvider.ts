@@ -383,7 +383,7 @@ export class ChatHistoryProvider {
         return null;
     }
 
-    private buildUsageFromMeta(meta: any, request: any): PromptUsage {
+    private buildUsageFromMeta(meta: any, request: any, resultDetails?: unknown): PromptUsage {
         const inputTokens: number | undefined =
             typeof meta.promptTokens === 'number' ? meta.promptTokens : undefined;
         const outputTokens: number | undefined =
@@ -391,9 +391,9 @@ export class ChatHistoryProvider {
                 : (typeof request?.completionTokens === 'number' ? request.completionTokens : undefined);
         // Cached input tokens, if present.
         let cacheTokens = 0;
-        const details = meta.promptTokenDetails;
-        if (details && typeof details === 'object') {
-            const c = details.cacheReadTokens ?? details.cachedTokens ?? details.cacheTokens;
+        const tokenDetails = meta.promptTokenDetails;
+        if (tokenDetails && typeof tokenDetails === 'object') {
+            const c = tokenDetails.cacheReadTokens ?? tokenDetails.cachedTokens ?? tokenDetails.cacheTokens;
             if (typeof c === 'number') { cacheTokens = c; }
         }
         const model = meta.resolvedModel || request?.modelId || '';
@@ -401,7 +401,7 @@ export class ChatHistoryProvider {
         // Prefer the ACTUAL billed credits Copilot records (nanoAiu) — this matches the
         // number shown in Copilot's own usage view exactly. Only fall back to computing
         // AIC from tokens × model price when Copilot didn't record a credit value.
-        const nanoAiu = this.extractNanoAiu(meta, request);
+        const nanoAiu = this.extractNanoAiu(meta, request, resultDetails);
         let aic: number | undefined;
         if (nanoAiu !== undefined) {
             aic = nanoAiu / NANO_AIU_PER_AIC;
@@ -420,8 +420,8 @@ export class ChatHistoryProvider {
         };
     }
 
-    /** Best-effort read of the raw billed credits (nanoAiu) Copilot may record for a request. */
-    private extractNanoAiu(meta: any, request: any): number | undefined {
+    /** Best-effort read of the raw billed credits Copilot may record for a request, normalized to nanoAiu. */
+    private extractNanoAiu(meta: any, request: any, resultDetails?: unknown): number | undefined {
         const candidates = [
             meta?.copilotUsageNanoAiu, meta?.nanoAiu, meta?.nanoAiU,
             meta?.usage?.copilotUsageNanoAiu, meta?.usage?.nanoAiu,
@@ -432,7 +432,32 @@ export class ChatHistoryProvider {
                 return c;
             }
         }
+        // Copilot's human-readable usage line — e.g. "Raptor mini • 2.0 credits" — is written
+        // to `result.details` once billing is fully reconciled. It's more reliable than the
+        // `copilotCredits` number on the request record, which is an early estimate that we've
+        // observed staying stuck at a much smaller provisional value (e.g. 0.13 vs. the final 1.96).
+        const fromDetails = this.parseCreditsFromDetails(resultDetails ?? request?.result?.details);
+        if (fromDetails !== undefined) {
+            return fromDetails;
+        }
+        const credits = request?.copilotCredits ?? meta?.copilotCredits;
+        if (typeof credits === 'number' && isFinite(credits) && credits >= 0) {
+            return credits * NANO_AIU_PER_AIC;
+        }
         return undefined;
+    }
+
+    /** Parse "... 2.0 credits" out of Copilot's free-text usage summary. */
+    private parseCreditsFromDetails(detailsValue: unknown): number | undefined {
+        if (typeof detailsValue !== 'string') {
+            return undefined;
+        }
+        const match = detailsValue.match(/(\d+(?:\.\d+)?)\s+(?:ai\s+)?credits?\b/i);
+        if (!match) {
+            return undefined;
+        }
+        const credits = Number(match[1]);
+        return isFinite(credits) ? credits * NANO_AIU_PER_AIC : undefined;
     }
 
     /** Extract assistant response text from a request stub (best-effort). */
@@ -517,7 +542,7 @@ export class ChatHistoryProvider {
                     // Snapshot form may embed the result inline.
                     const embedded = this.resultMetadataOf(it.result);
                     if (embedded) {
-                        usages[currentIdx] = this.buildUsageFromMeta(embedded, it);
+                        usages[currentIdx] = this.buildUsageFromMeta(embedded, it, it.result?.details);
                     }
                 }
             };
@@ -542,7 +567,7 @@ export class ChatHistoryProvider {
                 // Result metadata (attach to the current request if not already set).
                 const meta = this.resultMetadataOf(v);
                 if (meta && currentIdx >= 0 && usages[currentIdx] === undefined) {
-                    usages[currentIdx] = this.buildUsageFromMeta(meta, requestRecs[currentIdx]);
+                    usages[currentIdx] = this.buildUsageFromMeta(meta, requestRecs[currentIdx], v?.details);
                 }
 
                 // Dynamic pricing detection.

@@ -6,7 +6,7 @@ import { ChatHistoryProvider, ChatMessage, ChatSession } from './chatHistoryProv
 import { HistoryTreeProvider } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
 import { ChatViewerPanel } from './chatViewerPanel';
-import { FilterState, FilterMode } from './filterState';
+import { FilterState, FilterMode, MONTHS } from './filterState';
 import { loadPricingOverrides } from './modelPricing';
 import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS } from './excelExport';
 
@@ -90,11 +90,18 @@ function registerCommands(context: vscode.ExtensionContext) {
                 [
                     { label: '$(calendar) This Month', mode: 'month' as FilterMode, description: 'Current calendar month' },
                     { label: '$(calendar) This Week', mode: 'week' as FilterMode, description: 'Monday – Sunday of the current week' },
+                    { label: '$(calendar) Pick Month…', mode: 'pickedMonth' as FilterMode, description: 'Choose any month & year' },
+                    { label: '$(calendar) Custom Range…', mode: 'range' as FilterMode, description: 'Choose a from – to date range' },
                     { label: '$(infinity) All time', mode: 'all' as FilterMode, description: 'Every chat' }
                 ],
                 { placeHolder: `Current: ${filterState.range.label}` }
             );
-            if (picked) {
+            if (!picked) { return; }
+            if (picked.mode === 'range') {
+                await promptCustomRange();
+            } else if (picked.mode === 'pickedMonth') {
+                await promptPickMonth();
+            } else {
                 filterState.setMode(picked.mode);
             }
         })
@@ -165,6 +172,54 @@ function registerCommands(context: vscode.ExtensionContext) {
     );
 }
 
+/** Prompt for a "YYYY-MM-DD" date string; returns undefined if the user cancelled. */
+function isValidDateStr(v: string | undefined): boolean {
+    return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(new Date(v).getTime());
+}
+
+/** Ask the user for a from–to date range (both text inputs) and apply it to the filter. */
+async function promptCustomRange(): Promise<void> {
+    const fromStr = await vscode.window.showInputBox({
+        title: 'Custom Range — From date',
+        prompt: 'From date (inclusive)',
+        placeHolder: 'YYYY-MM-DD',
+        validateInput: v => isValidDateStr(v) ? undefined : 'Enter a valid date as YYYY-MM-DD'
+    });
+    if (!fromStr) { return; }
+
+    const toStr = await vscode.window.showInputBox({
+        title: 'Custom Range — To date',
+        prompt: 'To date (inclusive)',
+        placeHolder: 'YYYY-MM-DD',
+        value: fromStr,
+        validateInput: v => isValidDateStr(v) ? undefined : 'Enter a valid date as YYYY-MM-DD'
+    });
+    if (!toStr) { return; }
+
+    const [fy, fm, fd] = fromStr.split('-').map(Number);
+    const [ty, tm, td] = toStr.split('-').map(Number);
+    const start = new Date(fy, fm - 1, fd, 0, 0, 0, 0).getTime();
+    const end = new Date(ty, tm - 1, td, 23, 59, 59, 999).getTime();
+    if (end < start) {
+        vscode.window.showErrorMessage('The "to" date must be on or after the "from" date.');
+        return;
+    }
+    filterState.setCustomRange(start, end);
+}
+
+/** Ask the user to pick any calendar month (not just the current one). */
+async function promptPickMonth(): Promise<void> {
+    const now = new Date();
+    const items = Array.from({ length: 24 }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        return { label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, year: d.getFullYear(), month: d.getMonth() };
+    });
+    const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Choose a month to filter / export' });
+    if (picked) {
+        filterState.setPickedMonth(picked.year, picked.month);
+    }
+}
+
 async function exportCurrentFilter(): Promise<void> {
     const range = filterState.range;
     const sessions = chatHistoryProvider.getSessions();
@@ -182,7 +237,8 @@ async function exportCurrentFilter(): Promise<void> {
     }
 
     const stamp = new Date().toISOString().slice(0, 10);
-    const defaultName = `copilot-report-${range.mode}-${stamp}.xlsx`;
+    const rangeSlug = range.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const defaultName = `copilot-report-${rangeSlug}-${stamp}.xlsx`;
     const defaultDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
 
     const uri = await vscode.window.showSaveDialog({

@@ -32,7 +32,30 @@
       "PowerShell(npm run compile 2>&1)",
       "Bash(npm init *)",
       "Bash(unzip -l github-copilot-report-1.2.0.vsix)",
-      "Bash(sort -k1 -n -r)"
+      "Bash(sort -k1 -n -r)",
+      "Read(//c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/chatSessions/**)",
+      "Bash(node \"C:\\\\Users\\\\HUNGNG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HungNguyenThanh-OneDrive---NASHTECH-study-extension-github-copilot-report\\\\bb0b8e17-b037-4afd-9980-73d7f7c34faa\\\\scratchpad\\\\inspect.js\" \"/c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/chatSessions/8c6c41ba-8965-4d51-961e-4298c565b525.jsonl\")",
+      "Read(//c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/**)",
+      "Bash(xargs -I{} grep -o '\"oswe[^\"]*\"[^}]\\\\{0,300\\\\}\"inputCost\"[^,}]*' {})",
+      "Read(//c/Users/HungNguyenThanh/Downloads/**)",
+      "Read(//c/Users/HungNguyenThanh/**)",
+      "Read(//c/Users/HungNguyenThanh/Documents/**)",
+      "Bash(ext=\"/c/Users/HungNguyenThanh/.vscode/extensions\" *)",
+      "Read(//c/Users/HungNguyenThanh/.vscode/extensions/**)",
+      "Read(//c/Users/HungNguyenThanh/AppData/Local/Programs/Microsoft VS Code/resources/app/**)",
+      "Read(//c/Program Files/Microsoft VS Code/resources/app/**)",
+      "Bash(code --list-extensions)",
+      "Bash(node \"C:\\\\Users\\\\HUNGNG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HungNguyenThanh-OneDrive---NASHTECH-study-extension-github-copilot-report\\\\bb0b8e17-b037-4afd-9980-73d7f7c34faa\\\\scratchpad\\\\inspect2.js\" \"/c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/chatSessions/8c6c41ba-8965-4d51-961e-4298c565b525.jsonl\")",
+      "Bash(node 'C:\\\\Users\\\\HUNGNG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HungNguyenThanh-OneDrive---NASHTECH-study-extension-github-copilot-report\\\\bb0b8e17-b037-4afd-9980-73d7f7c34faa\\\\scratchpad\\\\inspect2.js' /c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/chatSessions/8c6c41ba-8965-4d51-961e-4298c565b525.jsonl)",
+      "Read(//c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022//**)",
+      "Read(//c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/GitHub.copilot-chat/debug-logs/8c6c41ba-8965-4d51-961e-4298c565b525/**)",
+      "Bash(node 'C:\\\\Users\\\\HUNGNG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HungNguyenThanh-OneDrive---NASHTECH-study-extension-github-copilot-report\\\\bb0b8e17-b037-4afd-9980-73d7f7c34faa\\\\scratchpad\\\\inspect2.js' /c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/GitHub.copilot-chat/debug-logs/8c6c41ba-8965-4d51-961e-4298c565b525/main.jsonl)",
+      "Read(//c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/GitHub.copilot-chat/transcripts/**)",
+      "Bash(node 'C:\\\\Users\\\\HUNGNG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-HungNguyenThanh-OneDrive---NASHTECH-study-extension-github-copilot-report\\\\bb0b8e17-b037-4afd-9980-73d7f7c34faa\\\\scratchpad\\\\inspect2.js' /c/Users/HungNguyenThanh/AppData/Roaming/Code/User/workspaceStorage/55c925451eea5c9aa3031ad9a8d31022/GitHub.copilot-chat/transcripts/8c6c41ba-8965-4d51-961e-4298c565b525.jsonl)",
+      "Bash(gh api *)",
+      "PowerShell(\\(Get-Command gh -ErrorAction SilentlyContinue\\) -ne $null)",
+      "Bash(curl -s \"https://api.github.com/repos/ailmind/github-copilot-chat-usage/git/trees/HEAD?recursive=1\")",
+      "Bash(xargs grep -l -i \"this month\\\\|this week\\\\|thisMonth\\\\|thisWeek\")"
     ]
   }
 }
