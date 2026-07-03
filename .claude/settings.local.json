@@ -55,7 +55,8 @@
       "Bash(gh api *)",
       "PowerShell(\\(Get-Command gh -ErrorAction SilentlyContinue\\) -ne $null)",
       "Bash(curl -s \"https://api.github.com/repos/ailmind/github-copilot-chat-usage/git/trees/HEAD?recursive=1\")",
-      "Bash(xargs grep -l -i \"this month\\\\|this week\\\\|thisMonth\\\\|thisWeek\")"
+      "Bash(xargs grep -l -i \"this month\\\\|this week\\\\|thisMonth\\\\|thisWeek\")",
+      "WebFetch(domain:docs.github.com)"
     ]
   }
 }

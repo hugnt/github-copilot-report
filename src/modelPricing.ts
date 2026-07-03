@@ -63,17 +63,55 @@ export interface ModelPricing {
 }
 
 /**
- * Confirmed defaults observed in the local Copilot chat data. Anything not listed here is
- * resolved dynamically from the session files (models embed their own pricing) or from the
- * `githubCopilotReport.modelPricing` setting. Values are AIC per 1,000,000 tokens.
+ * Confirmed/known defaults for every model GitHub Copilot currently offers, kept in sync with
+ * https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing (usage-based
+ * AIC pricing) and https://docs.github.com/en/copilot/reference/ai-models/supported-models
+ * (model catalog). Anything not listed here (or superseded) is resolved dynamically from the
+ * session files (models embed their own pricing) or from the `githubCopilotReport.modelPricing`
+ * setting. Values are AIC per 1,000,000 tokens (1 AIC = $0.01 USD).
+ *
+ * Note: a few models (GPT-5.4, GPT-5.5, Gemini 3.1 Pro) bill a higher "long context" tier once a
+ * request exceeds their base context window; the entries below use the base/default tier, and the
+ * dynamic session-file detector (`detectPricingInLine`) overrides with the real observed rate.
  */
 const DEFAULT_PRICING: Record<string, ModelPricing> = {
-    'claude-sonnet-4-6': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4.6' },
-    'claude-sonnet-4-5': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4.5' },
-    'claude-sonnet-4': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4' },
+    // ── OpenAI ──────────────────────────────────────────────────────────────
     'gpt-4-1': { multiplier: 0, displayName: 'GPT-4.1' },
     'gpt-4o': { multiplier: 0, displayName: 'GPT-4o' },
-    'gpt-5-mini': { multiplier: 0, displayName: 'GPT-5 mini' }
+    'gpt-5-mini': { inputCost: 25, outputCost: 200, cacheCost: 2.5, displayName: 'GPT-5 mini' },
+    'gpt-5-3-codex': { inputCost: 175, outputCost: 1400, cacheCost: 17.5, displayName: 'GPT-5.3-Codex' },
+    'gpt-5-4': { inputCost: 250, outputCost: 1500, cacheCost: 25, displayName: 'GPT-5.4' },
+    'gpt-5-4-mini': { inputCost: 75, outputCost: 450, cacheCost: 7.5, displayName: 'GPT-5.4 mini' },
+    'gpt-5-4-nano': { inputCost: 20, outputCost: 125, cacheCost: 2, displayName: 'GPT-5.4 nano' },
+    'gpt-5-5': { inputCost: 500, outputCost: 3000, cacheCost: 50, displayName: 'GPT-5.5' },
+
+    // ── Anthropic ───────────────────────────────────────────────────────────
+    'claude-haiku-4-5': { inputCost: 100, outputCost: 500, cacheCost: 10, displayName: 'Claude Haiku 4.5' },
+    'claude-sonnet-4': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4' },
+    'claude-sonnet-4-5': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4.5' },
+    'claude-sonnet-4-6': { inputCost: 300, outputCost: 1500, cacheCost: 30, displayName: 'Claude Sonnet 4.6' },
+    'claude-sonnet-5': { inputCost: 200, outputCost: 1000, cacheCost: 20, displayName: 'Claude Sonnet 5' },
+    'claude-opus-4-5': { inputCost: 500, outputCost: 2500, cacheCost: 50, displayName: 'Claude Opus 4.5' },
+    'claude-opus-4-6': { inputCost: 500, outputCost: 2500, cacheCost: 50, displayName: 'Claude Opus 4.6' },
+    'claude-opus-4-7': { inputCost: 500, outputCost: 2500, cacheCost: 50, displayName: 'Claude Opus 4.7' },
+    'claude-opus-4-8': { inputCost: 500, outputCost: 2500, cacheCost: 50, displayName: 'Claude Opus 4.8' },
+    'claude-opus-4-8-fast': { inputCost: 1000, outputCost: 5000, cacheCost: 100, displayName: 'Claude Opus 4.8 (fast mode)' },
+    'claude-fable-5': { inputCost: 1000, outputCost: 5000, cacheCost: 100, displayName: 'Claude Fable 5' },
+
+    // ── Google ──────────────────────────────────────────────────────────────
+    'gemini-2-5-pro': { inputCost: 125, outputCost: 1000, cacheCost: 12.5, displayName: 'Gemini 2.5 Pro' },
+    'gemini-3-flash': { inputCost: 50, outputCost: 300, cacheCost: 5, displayName: 'Gemini 3 Flash' },
+    'gemini-3-1-pro': { inputCost: 200, outputCost: 1200, cacheCost: 20, displayName: 'Gemini 3.1 Pro' },
+    'gemini-3-5-flash': { inputCost: 150, outputCost: 900, cacheCost: 15, displayName: 'Gemini 3.5 Flash' },
+
+    // ── Microsoft ───────────────────────────────────────────────────────────
+    'mai-code-1-flash': { inputCost: 75, outputCost: 450, cacheCost: 7.5, displayName: 'MAI-Code-1-Flash' },
+
+    // ── Moonshot AI ─────────────────────────────────────────────────────────
+    'kimi-k2-7-code': { inputCost: 95, outputCost: 400, cacheCost: 19, displayName: 'Kimi K2.7 Code' },
+
+    // ── GitHub fine-tuned ───────────────────────────────────────────────────
+    'raptor-mini': { inputCost: 25, outputCost: 200, cacheCost: 2.5, displayName: 'Raptor mini' }
 };
 
 /** Live registry, seeded from defaults and augmented at runtime. */
