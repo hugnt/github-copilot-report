@@ -104,12 +104,14 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
 
     // ---- Filtered session tree ----
     private computeStats(session: ChatSession): SessionStats {
-        const stats: SessionStats = { promptCount: 0, inTok: 0, outTok: 0, aic: 0, aicComplete: true, messages: [] };
-        for (const msg of session.messages) {
-            if (this.range.mode !== 'all' && !isInRange(msg.timestamp, this.range)) {
-                continue;
-            }
-            stats.messages.push(msg);
+        const messages = session.messages.filter(msg =>
+            this.range.mode === 'all' || isInRange(msg.timestamp, this.range));
+        return this.aggregateStats(messages);
+    }
+
+    private aggregateStats(messages: ChatMessage[]): SessionStats {
+        const stats: SessionStats = { promptCount: 0, inTok: 0, outTok: 0, aic: 0, aicComplete: true, messages };
+        for (const msg of messages) {
             if (msg.role === 'user') {
                 stats.promptCount++;
                 const u = msg.usage;
@@ -253,8 +255,10 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
         const item = new ChatTreeItem(`${icon} ${preview}`, vscode.TreeItemCollapsibleState.None, undefined, msg);
         item.iconPath = new vscode.ThemeIcon(isUser ? 'account' : 'copilot');
 
-        if (isUser && msg.usage) {
-            const u = msg.usage;
+        const hasUsage = isUser && msg.usage &&
+            (msg.usage.inputTokens !== undefined || msg.usage.outputTokens !== undefined || msg.usage.aic !== undefined);
+        if (hasUsage) {
+            const u = msg.usage!;
             const total = (u.inputTokens || 0) + (u.outputTokens || 0);
             // The token / AIC / USD badge shown next to each prompt.
             item.description = `▲${formatTokens(u.inputTokens)} ▼${formatTokens(u.outputTokens)} · ${formatAic(u.aic)} AIC · ${formatUsd(computeUsd(u.aic))}`;
@@ -280,31 +284,56 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
     }
 
     // ---- Grouping ----
-    private groupByDay(entries: { session: ChatSession; stats: SessionStats }[]): Map<string, { session: ChatSession; stats: SessionStats }[]> {
-        const groups = new Map<string, { session: ChatSession; stats: SessionStats }[]>();
+    private dayLabel(ts: number): string {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         const yesterday = today - 86400000;
-
-        // Preserve recency order already established in `entries`.
-        for (const e of entries) {
-            const ts = this.latestTs(e.stats);
-            const d = new Date(ts);
-            const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-            let label: string;
-            if (dayStart >= today) {
-                label = '📅 Today';
-            } else if (dayStart >= yesterday) {
-                label = '📅 Yesterday';
-            } else if (this.range.mode === 'all' && (today - dayStart) > 60 * 86400000) {
-                label = `📅 ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-            } else {
-                label = `📅 ${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()].substring(0, 3)} ${d.getDate()}`;
-            }
-            if (!groups.has(label)) { groups.set(label, []); }
-            groups.get(label)!.push(e);
+        const d = new Date(ts);
+        const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        if (dayStart >= today) {
+            return '📅 Today';
         }
-        return groups;
+        if (dayStart >= yesterday) {
+            return '📅 Yesterday';
+        }
+        if (this.range.mode === 'all' && (today - dayStart) > 60 * 86400000) {
+            return `📅 ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+        }
+        return `📅 ${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()].substring(0, 3)} ${d.getDate()}`;
+    }
+
+    // Splits each session's messages by the calendar day they were actually
+    // sent, so a session whose activity spans multiple days shows up under
+    // every day it was used, with only that day's messages/stats under it.
+    private groupByDay(entries: { session: ChatSession; stats: SessionStats }[]): Map<string, { session: ChatSession; stats: SessionStats }[]> {
+        const groups = new Map<string, { session: ChatSession; stats: SessionStats }[]>();
+        for (const e of entries) {
+            const byDay = new Map<string, ChatMessage[]>();
+            for (const msg of e.stats.messages) {
+                const label = this.dayLabel(msg.timestamp);
+                if (!byDay.has(label)) { byDay.set(label, []); }
+                byDay.get(label)!.push(msg);
+            }
+            for (const [label, msgs] of byDay) {
+                if (!groups.has(label)) { groups.set(label, []); }
+                groups.get(label)!.push({ session: e.session, stats: this.aggregateStats(msgs) });
+            }
+        }
+
+        // Order groups newest-day-first, and sessions within a group by
+        // their latest message on that day.
+        const labels = [...groups.keys()].sort((a, b) => {
+            const aMax = Math.max(...groups.get(a)!.map(e => this.latestTs(e.stats)));
+            const bMax = Math.max(...groups.get(b)!.map(e => this.latestTs(e.stats)));
+            return bMax - aMax;
+        });
+        const ordered = new Map<string, { session: ChatSession; stats: SessionStats }[]>();
+        for (const label of labels) {
+            const list = groups.get(label)!;
+            list.sort((a, b) => this.latestTs(b.stats) - this.latestTs(a.stats));
+            ordered.set(label, list);
+        }
+        return ordered;
     }
 
     private mdEscape(text: string): string {

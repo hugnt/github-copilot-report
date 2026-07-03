@@ -5,7 +5,7 @@ import { formatTokens, formatAic, formatUsd, computeUsd, getModelDisplayName } f
 /** Build a small token / AIC / USD badge for a prompt that has usage metadata. */
 function usageBadge(msg: ChatMessage): string {
     const u = msg.usage;
-    if (!u || (u.inputTokens === undefined && u.outputTokens === undefined)) {
+    if (!u || (u.inputTokens === undefined && u.outputTokens === undefined && u.aic === undefined)) {
         return '';
     }
     const model = getModelDisplayName(u.model);

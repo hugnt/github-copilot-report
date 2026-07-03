@@ -374,10 +374,17 @@ export class ChatHistoryProvider {
         return it && typeof it === 'object' && it.requestId && it.message;
     }
 
-    /** If a value is a result object carrying token metadata, return that metadata. */
+    /**
+     * If a value is a result object carrying metadata, return that metadata.
+     *
+     * Doesn't require promptTokens/outputTokens to be present: a stopped/cancelled
+     * generation can still emit a result whose metadata lacks token counts but whose
+     * `details` text (or another field `buildUsageFromMeta` checks) carries the billed
+     * credits — rejecting it here would throw that away and show "no usage data" even
+     * though partial billing info exists in the log.
+     */
     private resultMetadataOf(v: any): any | null {
-        if (v && typeof v === 'object' && v.metadata && typeof v.metadata === 'object'
-            && (v.metadata.promptTokens !== undefined || v.metadata.outputTokens !== undefined)) {
+        if (v && typeof v === 'object' && v.metadata && typeof v.metadata === 'object') {
             return v.metadata;
         }
         return null;
@@ -627,7 +634,7 @@ export class ChatHistoryProvider {
             for (let i = 0; i < requestRecs.length; i++) {
                 const request = requestRecs[i];
                 const usage = usages[i];
-                const msgTimestamp = request.timestamp || session.timestamp;
+                const msgTimestamp = request.timestamp || sessionData.creationDate || session.timestamp;
 
                 const userText = this.extractUserText(request);
                 if (userText) {
