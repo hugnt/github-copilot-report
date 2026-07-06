@@ -394,7 +394,16 @@ export class ChatHistoryProvider {
             const c = tokenDetails.cacheReadTokens ?? tokenDetails.cachedTokens ?? tokenDetails.cacheTokens;
             if (typeof c === 'number') { cacheTokens = c; }
         }
-        const model = meta.resolvedModel || request?.modelId || '';
+        // `request.modelId` is often just the alias the user picked (e.g. "copilot/auto"), not
+        // the concrete model that actually served the request — Copilot never records that
+        // resolution anywhere in the metadata. The one place the concrete model's friendly name
+        // does show up is the leading segment of `result.details` (e.g. "GPT-5 mini • 0.3
+        // credits"), so fall back to that when the id we have is a bare alias.
+        let model = meta.resolvedModel || request?.modelId || '';
+        if (!model || /(^|\/)auto$/i.test(model)) {
+            const detailsName = this.parseModelNameFromDetails(resultDetails);
+            if (detailsName) { model = detailsName; }
+        }
 
         // AIC comes exclusively from the credits Copilot actually billed for this request
         // (nanoAiu) — matching ailmind/github-copilot-chat-usage. There is no token × price
@@ -410,6 +419,23 @@ export class ChatHistoryProvider {
             nanoAiu,
             requestId: request?.requestId,
             responseId: meta.responseId
+        };
+    }
+
+    /** Fold a freshly-parsed usage record into whatever was already recorded for this request, letting each field win independently — a later, more complete event fills gaps rather than being discarded because *something* was already recorded. */
+    private mergeUsage(existing: PromptUsage | undefined, incoming: PromptUsage): PromptUsage {
+        if (!existing) {
+            return incoming;
+        }
+        return {
+            inputTokens: incoming.inputTokens ?? existing.inputTokens,
+            outputTokens: incoming.outputTokens ?? existing.outputTokens,
+            cacheTokens: incoming.cacheTokens ?? existing.cacheTokens,
+            model: incoming.model || existing.model,
+            aic: incoming.aic ?? existing.aic,
+            nanoAiu: incoming.nanoAiu ?? existing.nanoAiu,
+            requestId: incoming.requestId ?? existing.requestId,
+            responseId: incoming.responseId ?? existing.responseId
         };
     }
 
@@ -446,6 +472,15 @@ export class ChatHistoryProvider {
         }
         const credits = Number(match[1]);
         return isFinite(credits) ? Math.round(credits * NANO_AIU_PER_AIC) : undefined;
+    }
+
+    /** Pull the model's friendly name out of Copilot's free-text usage summary, e.g. "GPT-5 mini • 0.3 credits" -> "GPT-5 mini". */
+    private parseModelNameFromDetails(detailsValue: unknown): string | undefined {
+        if (typeof detailsValue !== 'string') {
+            return undefined;
+        }
+        const name = detailsValue.split('•')[0].trim();
+        return name || undefined;
     }
 
     /** Extract assistant response text from a request stub (best-effort). */
@@ -522,6 +557,12 @@ export class ChatHistoryProvider {
                     if (it.modelId) { existing.modelId = it.modelId; }
                     if (it.message?.text && !existing.message?.text) { existing.message = it.message; }
                     currentIdx = i;
+                    // A re-emitted snapshot may carry a fuller `result` than what we saw before.
+                    const reEmbedded = this.resultMetadataOf(it.result);
+                    if (reEmbedded) {
+                        const incoming = this.buildUsageFromMeta(reEmbedded, existing, it.result?.details);
+                        usages[i] = this.mergeUsage(usages[i], incoming);
+                    }
                 } else {
                     requestIndexById.set(rid, requestRecs.length);
                     requestRecs.push(it);
@@ -552,10 +593,18 @@ export class ChatHistoryProvider {
                     if (this.isRequestItem(it)) { ingestRequestItem(it); }
                 }
 
-                // Result metadata (attach to the current request if not already set).
+                // Result metadata (attach to the current request, merging into whatever's there).
+                //
+                // Copilot writes a request's `result` more than once while it's in flight: an
+                // early patch carries only tool-call-round bookkeeping (no promptTokens/credits),
+                // and a later patch fills in the real usage once billing is reconciled. Only ever
+                // taking the FIRST metadata event (as this used to do) meant that early, empty
+                // patch would permanently win, and the prompt would show "no usage data" forever
+                // even though the fuller data arrived later in the same file.
                 const meta = this.resultMetadataOf(v);
-                if (meta && currentIdx >= 0 && usages[currentIdx] === undefined) {
-                    usages[currentIdx] = this.buildUsageFromMeta(meta, requestRecs[currentIdx], v?.details);
+                if (meta && currentIdx >= 0) {
+                    const incoming = this.buildUsageFromMeta(meta, requestRecs[currentIdx], v?.details);
+                    usages[currentIdx] = this.mergeUsage(usages[currentIdx], incoming);
                 }
 
                 // Dynamic model display-name detection.
