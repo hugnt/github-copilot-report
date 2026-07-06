@@ -7,10 +7,13 @@ import { HistoryTreeProvider } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
 import { ChatViewerPanel } from './chatViewerPanel';
 import { FilterState, FilterMode, MONTHS } from './filterState';
-import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS } from './excelExport';
+import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS, DateSortOrder } from './excelExport';
 
 const CONFIG_NS = 'githubCopilotReport';
-const EXPORT_COLS_KEY = 'githubCopilotReport.exportColumns';
+// Bumped to .v2 so pre-existing saved selections (from before the column defaults changed) don't
+// silently override the new "necessary fields only" default for users who never touched the picker.
+const EXPORT_COLS_KEY = 'githubCopilotReport.exportColumns.v2';
+const EXPORT_SORT_KEY = 'githubCopilotReport.exportSortOrder';
 
 let extensionContext: vscode.ExtensionContext;
 let chatHistoryProvider: ChatHistoryProvider;
@@ -228,11 +231,13 @@ async function exportCurrentFilter(): Promise<void> {
         return;
     }
 
-    // Let the user tick which columns to export (necessary fields pre-selected & remembered).
-    const columnIds = await pickExportColumns();
-    if (!columnIds) {
+    // Let the user tick which columns to export, plus the date sort order (necessary fields
+    // and ascending order pre-selected & remembered).
+    const picked = await pickExportColumns();
+    if (!picked) {
         return; // cancelled
     }
+    const { columnIds, sortOrder } = picked;
 
     const stamp = new Date().toISOString().slice(0, 10);
     const rangeSlug = range.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -249,7 +254,7 @@ async function exportCurrentFilter(): Promise<void> {
     try {
         const count = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Exporting ${summary.prompts} prompts to Excel…` },
-            async () => exportToExcel(sessions, range, uri.fsPath, columnIds)
+            async () => exportToExcel(sessions, range, uri.fsPath, columnIds, sortOrder)
         );
         const choice = await vscode.window.showInformationMessage(
             `Exported ${count} prompts (${range.label}) to Excel.`,
@@ -275,7 +280,8 @@ async function copyCurrentFilter(): Promise<void> {
         return;
     }
     const columnIds = getSavedColumns();
-    const { text, rows, columns } = buildClipboardTsv(chatHistoryProvider.getSessions(), range, columnIds);
+    const sortOrder = getSavedSortOrder();
+    const { text, rows, columns } = buildClipboardTsv(chatHistoryProvider.getSessions(), range, columnIds, sortOrder);
     await vscode.env.clipboard.writeText(text);
     vscode.window.showInformationMessage(
         `Copied ${rows} prompts × ${columns} columns (${range.label}) — paste into Excel or Google Sheets.`
@@ -288,21 +294,36 @@ function getSavedColumns(): string[] {
     return saved && saved.length ? saved : DEFAULT_EXPORT_COLUMN_IDS;
 }
 
+/** The saved date sort order for export/copy, defaulting to oldest-first (ascending). */
+function getSavedSortOrder(): DateSortOrder {
+    return extensionContext.globalState.get<DateSortOrder>(EXPORT_SORT_KEY, 'asc');
+}
+
+const SORT_ASC_ITEM_ID = '__sortAsc';
+
 /**
- * Show a multi-select picker of export columns. The "necessary" fields are pre-ticked and
- * the last choice is remembered. Returns the selected column ids (canonical order) or
- * undefined if the user cancelled.
+ * Show a multi-select picker of export columns, with a "sort ascending" checkbox tucked in
+ * right after Date. The "necessary" columns and ascending order are pre-ticked; the last
+ * choice is remembered. Returns the selected column ids (canonical order) plus the chosen
+ * sort order, or undefined if the user cancelled.
  */
-async function pickExportColumns(): Promise<string[] | undefined> {
+async function pickExportColumns(): Promise<{ columnIds: string[]; sortOrder: DateSortOrder } | undefined> {
     const savedSet = new Set(getSavedColumns());
+    const savedSortOrder = getSavedSortOrder();
 
     interface ColItem extends vscode.QuickPickItem { id: string; }
-    const items: ColItem[] = EXPORT_COLUMNS.map(c => ({
-        id: c.id,
-        label: c.header,
-        detail: c.detail,
-        picked: savedSet.has(c.id)
-    }));
+    const items: ColItem[] = [];
+    for (const c of EXPORT_COLUMNS) {
+        items.push({ id: c.id, label: c.header, detail: c.detail, picked: savedSet.has(c.id) });
+        if (c.id === 'date') {
+            items.push({
+                id: SORT_ASC_ITEM_ID,
+                label: '　↳ Sort ascending',
+                detail: 'Order rows oldest → newest (unchecked = newest first)',
+                picked: savedSortOrder === 'asc'
+            });
+        }
+    }
 
     const picked = await vscode.window.showQuickPick(items, {
         canPickMany: true,
@@ -313,16 +334,19 @@ async function pickExportColumns(): Promise<string[] | undefined> {
     if (!picked) {
         return undefined; // cancelled
     }
-    if (picked.length === 0) {
+    const pickedSet = new Set(picked.map(p => p.id));
+    const sortOrder: DateSortOrder = pickedSet.has(SORT_ASC_ITEM_ID) ? 'asc' : 'desc';
+    pickedSet.delete(SORT_ASC_ITEM_ID);
+    if (pickedSet.size === 0) {
         vscode.window.showWarningMessage('Select at least one column to export.');
         return undefined;
     }
 
     // Preserve the canonical column order from EXPORT_COLUMNS.
-    const pickedSet = new Set(picked.map(p => p.id));
     const ordered = EXPORT_COLUMNS.filter(c => pickedSet.has(c.id)).map(c => c.id);
     await extensionContext.globalState.update(EXPORT_COLS_KEY, ordered);
-    return ordered;
+    await extensionContext.globalState.update(EXPORT_SORT_KEY, sortOrder);
+    return { columnIds: ordered, sortOrder };
 }
 
 /** Watch state.vscdb files so the report auto-refreshes as you chat. */

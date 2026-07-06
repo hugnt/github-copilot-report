@@ -39,14 +39,14 @@ export interface ExportColumn {
 // Default-ticked (necessary) fields first, extras last.
 export const EXPORT_COLUMNS: ExportColumn[] = [
     { id: 'index', header: '#', width: 5, defaultOn: true, detail: 'Row number', get: (_r, i) => i + 1 },
-    { id: 'session', header: 'Session', width: 34, defaultOn: true, detail: 'Chat session title', get: r => r.sessionTitle },
+    { id: 'session', header: 'Session', width: 34, defaultOn: false, detail: 'Chat session title', get: r => r.sessionTitle },
     { id: 'model', header: 'Model', width: 18, defaultOn: true, detail: 'Model used', get: r => r.model },
     { id: 'prompt', header: 'Prompt', width: 60, defaultOn: true, detail: 'Your message text', get: r => r.prompt.replace(/\s+/g, ' ').trim() },
     { id: 'aic', header: 'AIC', width: 10, defaultOn: true, detail: 'AI Credits used', get: r => r.aic, numFmt: '0.00', sum: true },
-    { id: 'usd', header: 'USD (est.)', width: 12, defaultOn: true, detail: 'Estimated cost = AIC × rate', get: r => r.usd, numFmt: '$#,##0.0000', sum: true },
-    { id: 'inputTokens', header: 'Input Tokens', width: 14, defaultOn: true, detail: 'Token · prompt (input)', get: r => r.inputTokens, numFmt: '#,##0', sum: true },
-    { id: 'outputTokens', header: 'Output Tokens', width: 15, defaultOn: true, detail: 'Token · completion (output)', get: r => r.outputTokens, numFmt: '#,##0', sum: true },
-    { id: 'totalTokens', header: 'Total Tokens', width: 14, defaultOn: true, detail: 'Token · input + output', get: r => r.totalTokens, numFmt: '#,##0', sum: true },
+    { id: 'usd', header: 'USD (est.)', width: 12, defaultOn: false, detail: 'Estimated cost = AIC × rate', get: r => r.usd, numFmt: '$#,##0.0000', sum: true },
+    { id: 'inputTokens', header: 'Input Tokens', width: 14, defaultOn: false, detail: 'Token · prompt (input)', get: r => r.inputTokens, numFmt: '#,##0', sum: true },
+    { id: 'outputTokens', header: 'Output Tokens', width: 15, defaultOn: false, detail: 'Token · completion (output)', get: r => r.outputTokens, numFmt: '#,##0', sum: true },
+    { id: 'totalTokens', header: 'Total Tokens', width: 14, defaultOn: false, detail: 'Token · input + output', get: r => r.totalTokens, numFmt: '#,##0', sum: true },
     { id: 'date', header: 'Date', width: 18, defaultOn: true, detail: 'Prompt date & time', get: r => r.date, numFmt: 'yyyy-mm-dd hh:mm' },
     { id: 'workspace', header: 'Workspace', width: 20, defaultOn: false, detail: 'Project / folder', get: r => r.workspace },
     { id: 'response', header: 'Response', width: 60, defaultOn: false, detail: 'Assistant reply text', get: r => r.response.replace(/\s+/g, ' ').trim() }
@@ -81,8 +81,10 @@ function dayKey(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+export type DateSortOrder = 'asc' | 'desc';
+
 /** Collect the prompt-level rows for the given sessions within the range. */
-function buildData(sessions: ChatSession[], range: DateRange): BuiltData {
+function buildData(sessions: ChatSession[], range: DateRange, sortOrder: DateSortOrder = 'asc'): BuiltData {
     const rows: PromptRow[] = [];
     const totals = { chats: 0, prompts: 0, input: 0, output: 0, aic: 0, aicComplete: true };
     const byModel = new Map<string, { display: string; prompts: number; input: number; output: number; aic: number; aicComplete: boolean }>();
@@ -160,8 +162,7 @@ function buildData(sessions: ChatSession[], range: DateRange): BuiltData {
     }
 
     totals.chats = chatSet.size;
-    // Newest prompts first.
-    rows.sort((a, b) => b.date.getTime() - a.date.getTime());
+    rows.sort((a, b) => sortOrder === 'desc' ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime());
     return { rows, totals, byModel, byDay };
 }
 
@@ -308,9 +309,10 @@ export async function exportToExcel(
     sessions: ChatSession[],
     range: DateRange,
     filePath: string,
-    columnIds?: string[]
+    columnIds?: string[],
+    sortOrder: DateSortOrder = 'asc'
 ): Promise<number> {
-    const data = buildData(sessions, range);
+    const data = buildData(sessions, range, sortOrder);
     const cols = resolveColumns(columnIds);
 
     const wb = new ExcelJS.Workbook();
@@ -352,8 +354,8 @@ export interface ClipboardResult { text: string; rows: number; columns: number; 
  * Pastes cleanly into Excel / Google Sheets (one prompt per row, columns split by tab).
  * Includes a header row and a TOTAL row.
  */
-export function buildClipboardTsv(sessions: ChatSession[], range: DateRange, columnIds?: string[]): ClipboardResult {
-    const data = buildData(sessions, range);
+export function buildClipboardTsv(sessions: ChatSession[], range: DateRange, columnIds?: string[], sortOrder: DateSortOrder = 'asc'): ClipboardResult {
+    const data = buildData(sessions, range, sortOrder);
     const cols = resolveColumns(columnIds);
 
     const lines: string[] = [];
