@@ -285,9 +285,11 @@ export class ChatHistoryProvider {
                 const wsDir = path.join(workspaceStoragePath, workspace);
                 const chatSessionsPath = path.join(wsDir, 'chatSessions');
                 const transcriptsPath = path.join(wsDir, 'transcripts');
+                const copilotTranscriptsPath = path.join(wsDir, 'GitHub.copilot-chat', 'transcripts');
                 const hasChatSessions = fs.existsSync(chatSessionsPath);
                 const hasTranscripts = fs.existsSync(transcriptsPath);
-                if (!hasChatSessions && !hasTranscripts) {
+                const hasCopilotTranscripts = fs.existsSync(copilotTranscriptsPath);
+                if (!hasChatSessions && !hasTranscripts && !hasCopilotTranscripts) {
                     continue;
                 }
 
@@ -297,6 +299,9 @@ export class ChatHistoryProvider {
                 }
                 if (hasTranscripts) {
                     await this.parseChatSessionsFolder(transcriptsPath, workspace);
+                }
+                if (hasCopilotTranscripts) {
+                    await this.parseChatSessionsFolder(copilotTranscriptsPath, workspace);
                 }
             }
         } catch (error) {
