@@ -1,4 +1,4 @@
-import * as ExcelJS from 'exceljs';
+import type * as ExcelJS from 'exceljs';
 import { ChatSession } from './chatHistoryProvider';
 import { DateRange, isInRange } from './filterState';
 import { getModelDisplayName, normalizeModelId, getUsdPerAic } from './modelPricing';
@@ -312,6 +312,7 @@ export async function exportToExcel(
     columnIds?: string[],
     sortOrder: DateSortOrder = 'asc'
 ): Promise<number> {
+    const ExcelJS = await import('exceljs');
     const data = buildData(sessions, range, sortOrder);
     const cols = resolveColumns(columnIds);
 
