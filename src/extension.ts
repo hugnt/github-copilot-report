@@ -7,7 +7,7 @@ import { HistoryTreeProvider } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
 import { ChatViewerPanel } from './chatViewerPanel';
 import { FilterState, FilterMode, MONTHS } from './filterState';
-import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS, DateSortOrder } from './excelExport';
+import { buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS, DateSortOrder } from './exportSchema';
 
 const CONFIG_NS = 'githubCopilotReport';
 // Bumped to .v2 so pre-existing saved selections (from before the column defaults changed) don't
@@ -254,7 +254,10 @@ async function exportCurrentFilter(): Promise<void> {
     try {
         const count = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Exporting ${summary.prompts} prompts to Excel…` },
-            async () => exportToExcel(sessions, range, uri.fsPath, columnIds, sortOrder)
+            async () => {
+                vscode.window.showInformationMessage('Excel export is disabled in this environment (exceljs causes a startup crash on Remote Linux). Use Copy to Clipboard instead.');
+                return 0;
+            }
         );
         const choice = await vscode.window.showInformationMessage(
             `Exported ${count} prompts (${range.label}) to Excel.`,

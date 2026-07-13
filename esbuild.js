@@ -8,7 +8,7 @@ async function build() {
         entryPoints: ['./src/extension.ts'],
         bundle: true,
         outfile: './out/extension.js',
-        external: ['vscode'],
+        external: ['vscode', 'exceljs'],
         format: 'cjs',
         platform: 'node',
         sourcemap: !production,
