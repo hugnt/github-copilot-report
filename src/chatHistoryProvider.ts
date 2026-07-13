@@ -546,6 +546,107 @@ export class ChatHistoryProvider {
         return '';
     }
 
+    /** Parse newer Copilot event-stream transcripts (type/data/id/timestamp format). */
+    private parseEventTranscript(lines: string[], filePath: string, workspaceId: string): boolean {
+        const events: any[] = [];
+        for (const line of lines) {
+            try {
+                const obj = JSON.parse(line);
+                if (obj && typeof obj === 'object' && typeof obj.type === 'string' && obj.data && typeof obj.data === 'object') {
+                    events.push(obj);
+                }
+            } catch { /* ignore malformed lines */ }
+        }
+        if (events.length === 0) {
+            return false;
+        }
+
+        const start = events.find(e => e.type === 'session.start');
+        const sessionId = start?.data?.sessionId || path.basename(filePath, '.jsonl');
+        const storedInfo = this.sessionTitles.get(sessionId);
+        const inArchivedSet = this.archivedSessionIds.has(sessionId);
+        const finalIsArchived = (storedInfo?.isArchived === true) || inArchivedSet;
+
+        const toMs = (v: unknown): number => {
+            if (typeof v === 'number' && Number.isFinite(v)) { return v; }
+            if (typeof v === 'string') {
+                const n = Date.parse(v);
+                if (Number.isFinite(n)) { return n; }
+            }
+            return Date.now();
+        };
+
+        const messages: ChatMessage[] = [];
+        let firstUser = '';
+        let lastTs = toMs(start?.data?.startTime);
+
+        for (const ev of events) {
+            const ts = toMs(ev.timestamp);
+            if (ts > lastTs) { lastTs = ts; }
+
+            if (ev.type === 'user.message') {
+                const content = typeof ev.data?.content === 'string' ? ev.data.content : '';
+                if (!content) { continue; }
+                if (!firstUser) { firstUser = content; }
+                messages.push({
+                    sessionId,
+                    timestamp: ts,
+                    role: 'user',
+                    content,
+                    preview: content.substring(0, 200),
+                    usage: undefined,
+                });
+            } else if (ev.type === 'assistant.message') {
+                const content = typeof ev.data?.content === 'string' ? ev.data.content : '';
+                if (!content) { continue; }
+                const fileLinks = this.extractFileLinks(content);
+                messages.push({
+                    sessionId,
+                    timestamp: ts,
+                    role: 'assistant',
+                    content,
+                    preview: content.substring(0, 200),
+                    fileLinks: fileLinks.length > 0 ? fileLinks : undefined,
+                });
+            }
+        }
+
+        if (storedInfo?.isEmpty === true || messages.length === 0) {
+            return true;
+        }
+
+        let sessionTitle = storedInfo?.title || '';
+        if (!sessionTitle && firstUser) {
+            sessionTitle = firstUser.length > 60 ? `${firstUser.substring(0, 57)}...` : firstUser;
+        }
+        if (!sessionTitle) {
+            sessionTitle = `Session ${sessionId.substring(0, 8)}`;
+        }
+
+        const promptCount = messages.filter(m => m.role === 'user').length;
+        const session: ChatSession = {
+            id: sessionId,
+            title: sessionTitle,
+            timestamp: lastTs,
+            messages,
+            workspace: workspaceId,
+            workspaceLabel: this.workspaceLabels.get(workspaceId) || '',
+            filePath,
+            isArchived: finalIsArchived,
+            isDeleted: false,
+            promptCount,
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            totalAic: 0,
+            aicComplete: false,
+            models: [],
+        };
+
+        this.messages.push(...messages);
+        this.sessions.push(session);
+        return true;
+    }
+
     private async parseCopilotChatJsonl(filePath: string, workspaceId: string): Promise<void> {
         try {
             const content = fs.readFileSync(filePath, 'utf8');
@@ -553,6 +654,10 @@ export class ChatHistoryProvider {
             if (lines.length === 0) { return; }
 
             const firstLine = JSON.parse(lines[0]);
+            if (typeof firstLine?.type === 'string' && firstLine?.data && typeof firstLine.data === 'object') {
+                this.parseEventTranscript(lines, filePath, workspaceId);
+                return;
+            }
             const sessionData = firstLine.v || firstLine;
             if (typeof sessionData !== 'object' || Array.isArray(sessionData)) {
                 return;
