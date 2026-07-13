@@ -188,7 +188,11 @@ export class ChatHistoryProvider {
         } else if (process.platform === 'win32') {
             return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
         }
-        return path.join(homeDir, '.config', 'Code', 'User');
+        const desktopPath = path.join(homeDir, '.config', 'Code', 'User');
+        const serverPath = path.join(homeDir, '.vscode-server', 'data', 'User');
+        return fs.existsSync(desktopPath)
+            ? desktopPath
+            : (fs.existsSync(serverPath) ? serverPath : desktopPath);
     }
 
     private async loadSessionTitles(basePath: string): Promise<void> {
@@ -280,9 +284,19 @@ export class ChatHistoryProvider {
             for (const workspace of workspaces) {
                 const wsDir = path.join(workspaceStoragePath, workspace);
                 const chatSessionsPath = path.join(wsDir, 'chatSessions');
-                if (fs.existsSync(chatSessionsPath)) {
-                    this.workspaceLabels.set(workspace, this.readWorkspaceLabel(wsDir));
+                const transcriptsPath = path.join(wsDir, 'transcripts');
+                const hasChatSessions = fs.existsSync(chatSessionsPath);
+                const hasTranscripts = fs.existsSync(transcriptsPath);
+                if (!hasChatSessions && !hasTranscripts) {
+                    continue;
+                }
+
+                this.workspaceLabels.set(workspace, this.readWorkspaceLabel(wsDir));
+                if (hasChatSessions) {
                     await this.parseChatSessionsFolder(chatSessionsPath, workspace);
+                }
+                if (hasTranscripts) {
+                    await this.parseChatSessionsFolder(transcriptsPath, workspace);
                 }
             }
         } catch (error) {

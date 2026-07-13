@@ -398,7 +398,11 @@ function platformDefaultStorage(): string {
     } else if (process.platform === 'win32') {
         return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
     }
-    return path.join(homeDir, '.config', 'Code', 'User');
+    const desktopPath = path.join(homeDir, '.config', 'Code', 'User');
+    const serverPath = path.join(homeDir, '.vscode-server', 'data', 'User');
+    return fs.existsSync(desktopPath)
+        ? desktopPath
+        : (fs.existsSync(serverPath) ? serverPath : desktopPath);
 }
 
 function cleanupWatchers(): void {
