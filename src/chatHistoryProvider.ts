@@ -166,6 +166,7 @@ export class ChatHistoryProvider {
 
         const vscodePath = this.getVSCodeStoragePath();
         console.log('[CopilotReport] Refresh, storage path:', vscodePath);
+        console.log('[CopilotReport][diag] workspaceStorage exists:', fs.existsSync(path.join(vscodePath, 'workspaceStorage')));
 
         await this.loadSessionTitles(vscodePath);
         await this.parseWorkspaceStorage(vscodePath);
@@ -281,6 +282,7 @@ export class ChatHistoryProvider {
         }
         try {
             const workspaces = fs.readdirSync(workspaceStoragePath);
+            console.log('[CopilotReport][diag] workspaces found:', workspaces.length);
             for (const workspace of workspaces) {
                 const wsDir = path.join(workspaceStoragePath, workspace);
                 const chatSessionsPath = path.join(wsDir, 'chatSessions');
@@ -292,6 +294,12 @@ export class ChatHistoryProvider {
                 if (!hasChatSessions && !hasTranscripts && !hasCopilotTranscripts) {
                     continue;
                 }
+
+                console.log('[CopilotReport][diag] workspace:', workspace, {
+                    chatSessions: hasChatSessions,
+                    transcripts: hasTranscripts,
+                    copilotTranscripts: hasCopilotTranscripts,
+                });
 
                 this.workspaceLabels.set(workspace, this.readWorkspaceLabel(wsDir));
                 if (hasChatSessions) {
@@ -328,6 +336,8 @@ export class ChatHistoryProvider {
     private async parseChatSessionsFolder(folderPath: string, workspaceId: string): Promise<void> {
         try {
             const files = fs.readdirSync(folderPath);
+            const jsonlFiles = files.filter(f => f.endsWith('.jsonl'));
+            console.log('[CopilotReport][diag] scanning folder:', folderPath, 'jsonl:', jsonlFiles.length, 'workspace:', workspaceId);
             for (const file of files) {
                 if (file.endsWith('.jsonl')) {
                     await this.parseCopilotChatJsonl(path.join(folderPath, file), workspaceId);
@@ -644,6 +654,7 @@ export class ChatHistoryProvider {
 
         this.messages.push(...messages);
         this.sessions.push(session);
+        console.log('[CopilotReport][diag] parsed event transcript session:', sessionId, 'messages:', messages.length);
         return true;
     }
 
