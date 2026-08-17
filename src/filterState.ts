@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export type FilterMode = 'week' | 'month' | 'all' | 'range' | 'pickedMonth';
+export type FilterMode = 'today' | 'yesterday' | 'week' | 'month' | 'all' | 'range' | 'pickedMonth';
 
 export interface DateRange {
     mode: FilterMode;
@@ -21,9 +21,31 @@ function fmtFullDate(d: Date): string {
 }
 
 /** Compute the concrete date range for a filter mode, relative to `now`. */
-export function computeRange(mode: 'week' | 'month' | 'all', now: Date = new Date()): DateRange {
+export function computeRange(mode: 'today' | 'yesterday' | 'week' | 'month' | 'all', now: Date = new Date()): DateRange {
     if (mode === 'all') {
         return { mode, start: 0, end: Number.MAX_SAFE_INTEGER, label: 'All time' };
+    }
+
+    if (mode === 'today') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        return {
+            mode,
+            start: start.getTime(),
+            end: end.getTime(),
+            label: `Today (${fmtDay(start)})`
+        };
+    }
+
+    if (mode === 'yesterday') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+        return {
+            mode,
+            start: start.getTime(),
+            end: end.getTime(),
+            label: `Yesterday (${fmtDay(start)})`
+        };
     }
 
     if (mode === 'week') {
@@ -97,7 +119,7 @@ export class FilterState {
         if ((this._mode === 'range' || this._mode === 'pickedMonth') && this._customRange) {
             return this._customRange;
         }
-        return computeRange(this._mode as 'week' | 'month' | 'all');
+        return computeRange(this._mode as 'today' | 'yesterday' | 'week' | 'month' | 'all');
     }
 
     setMode(mode: FilterMode): void {

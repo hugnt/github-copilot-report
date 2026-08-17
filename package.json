@@ -73,6 +73,11 @@
       {
         "command": "githubCopilotReport.clearSearch",
         "title": "Clear Search"
+      },
+      {
+        "command": "githubCopilotReport.copyPromptRow",
+        "title": "Copy as Excel Row(s)",
+        "icon": "$(clippy)"
       }
     ],
     "viewsContainers": {
@@ -87,13 +92,19 @@
     "views": {
       "github-copilot-report": [
         {
-          "id": "githubCopilotReport.searchView",
-          "name": "Filter & Search",
+          "id": "githubCopilotReport.filterView",
+          "name": "Filter & Report",
           "type": "webview"
         },
         {
           "id": "githubCopilotReport.historyView",
-          "name": "Recent Chats"
+          "name": "Filter Result"
+        },
+        {
+          "id": "githubCopilotReport.searchView",
+          "name": "Search Chat Content",
+          "type": "webview",
+          "initialState": "collapsed"
         }
       ]
     },
@@ -126,6 +137,13 @@
           "when": "view == githubCopilotReport.historyView",
           "group": "navigation@3"
         }
+      ],
+      "view/item/context": [
+        {
+          "command": "githubCopilotReport.copyPromptRow",
+          "when": "view == githubCopilotReport.historyView && viewItem =~ /(userPrompt|chatSession|dateGroup)/",
+          "group": "inline"
+        }
       ]
     },
     "configuration": {
@@ -154,6 +172,8 @@
           "type": "string",
           "enum": [
             "month",
+            "today",
+            "yesterday",
             "week",
             "all"
           ],

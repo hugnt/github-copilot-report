@@ -280,6 +280,9 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             item.tooltip = msg.content;
         }
         item.command = { command: 'githubCopilotReport.openChat', title: 'Open', arguments: [msg] };
+        if (isUser) {
+            item.contextValue = 'userPrompt';
+        }
         return item;
     }
 

@@ -3,11 +3,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ChatHistoryProvider, ChatMessage, ChatSession } from './chatHistoryProvider';
-import { HistoryTreeProvider } from './historyTreeProvider';
+import { HistoryTreeProvider, ChatTreeItem } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
+import { FilterViewProvider } from './filterViewProvider';
 import { ChatViewerPanel } from './chatViewerPanel';
 import { FilterState, FilterMode, MONTHS } from './filterState';
 import { exportToExcel, buildClipboardTsv, EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMN_IDS, DateSortOrder } from './excelExport';
+import { getModelDisplayName, formatTokens, formatAic, formatUsd, computeUsd } from './modelPricing';
 
 const CONFIG_NS = 'githubCopilotReport';
 // Bumped to .v2 so pre-existing saved selections (from before the column defaults changed) don't
@@ -18,6 +20,7 @@ const EXPORT_SORT_KEY = 'githubCopilotReport.exportSortOrder';
 let extensionContext: vscode.ExtensionContext;
 let chatHistoryProvider: ChatHistoryProvider;
 let historyTreeProvider: HistoryTreeProvider;
+let filterViewProvider: FilterViewProvider;
 let searchViewProvider: SearchViewProvider;
 let filterState: FilterState;
 let stateDbWatchers: fs.FSWatcher[] = [];
@@ -34,7 +37,8 @@ export function activate(context: vscode.ExtensionContext) {
     chatHistoryProvider = new ChatHistoryProvider();
     filterState = new FilterState(defaultFilter);
     historyTreeProvider = new HistoryTreeProvider(chatHistoryProvider, filterState.range);
-    searchViewProvider = new SearchViewProvider(context.extensionUri, chatHistoryProvider, filterState);
+    filterViewProvider = new FilterViewProvider(context.extensionUri, chatHistoryProvider, filterState);
+    searchViewProvider = new SearchViewProvider(context.extensionUri, chatHistoryProvider);
 
     const treeView = vscode.window.createTreeView('githubCopilotReport.historyView', {
         treeDataProvider: historyTreeProvider,
@@ -42,6 +46,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('githubCopilotReport.filterView', filterViewProvider),
         vscode.window.registerWebviewViewProvider('githubCopilotReport.searchView', searchViewProvider)
     );
 
@@ -49,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         filterState.onDidChange(range => {
             historyTreeProvider.setRange(range);
-            searchViewProvider.updateFilterStats();
+            filterViewProvider.updateFilterStats();
         })
     );
 
@@ -61,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
         async () => {
             await chatHistoryProvider.refresh();
             historyTreeProvider.refresh();
-            searchViewProvider.updateFilterStats();
+            filterViewProvider.updateFilterStats();
             setupStateDbWatchers();
         }
     );
@@ -79,7 +84,7 @@ function registerCommands(context: vscode.ExtensionContext) {
                 async () => {
                     await chatHistoryProvider.refresh();
                     historyTreeProvider.refresh();
-                    searchViewProvider.updateFilterStats();
+                    filterViewProvider.updateFilterStats();
                 }
             );
         })
@@ -90,6 +95,8 @@ function registerCommands(context: vscode.ExtensionContext) {
             const picked = await vscode.window.showQuickPick(
                 [
                     { label: '$(calendar) This Month', mode: 'month' as FilterMode, description: 'Current calendar month' },
+                    { label: '$(calendar) Today', mode: 'today' as FilterMode, description: 'Today only' },
+                    { label: '$(calendar) Yesterday', mode: 'yesterday' as FilterMode, description: 'Yesterday only' },
                     { label: '$(calendar) This Week', mode: 'week' as FilterMode, description: 'Monday – Sunday of the current week' },
                     { label: '$(calendar) Pick Month…', mode: 'pickedMonth' as FilterMode, description: 'Choose any month & year' },
                     { label: '$(calendar) Custom Range…', mode: 'range' as FilterMode, description: 'Choose a from – to date range' },
@@ -143,6 +150,78 @@ function registerCommands(context: vscode.ExtensionContext) {
             if (selected) {
                 vscode.commands.executeCommand('githubCopilotReport.openChat', selected.message);
             }
+        })
+    );
+
+    // Copy one or more user-prompts as Excel-like TSV rows to the clipboard.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.copyPromptRow', (treeItem: ChatTreeItem) => {
+            if (!treeItem) { return; }
+
+            const messagesToCopy: { msg: ChatMessage, session: ChatSession }[] = [];
+
+            if (treeItem.contextValue === 'userPrompt') {
+                if (treeItem.message && treeItem.message.role === 'user') {
+                    const session = chatHistoryProvider.getSessionByMessage(treeItem.message);
+                    if (session) {
+                        messagesToCopy.push({ msg: treeItem.message, session });
+                    }
+                }
+            } else if (treeItem.contextValue === 'chatSession') {
+                const session = treeItem.session;
+                const stats = (treeItem as any).stats;
+                if (session && stats && stats.messages) {
+                    for (const msg of stats.messages) {
+                        if (msg.role === 'user') {
+                            messagesToCopy.push({ msg, session });
+                        }
+                    }
+                }
+            } else if (treeItem.contextValue === 'dateGroup') {
+                const sessions = (treeItem as any).sessions as { session: ChatSession; stats: any }[];
+                if (sessions) {
+                    for (const { session, stats } of sessions) {
+                        if (stats && stats.messages) {
+                            for (const msg of stats.messages) {
+                                if (msg.role === 'user') {
+                                    messagesToCopy.push({ msg, session });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (messagesToCopy.length === 0) {
+                vscode.window.showWarningMessage('No user prompts found to copy.');
+                return;
+            }
+
+            const headers = ['Date', 'Session', 'Model', 'Prompt', 'Input Tokens', 'Output Tokens', 'Total Tokens', 'AIC', 'USD (est.)'];
+            const rows: string[] = [headers.join('\t')];
+            const pad = (n: number) => String(n).padStart(2, '0');
+
+            for (const { msg, session } of messagesToCopy) {
+                const u = msg.usage;
+                const date = new Date(msg.timestamp);
+                const fmtDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+                const model = u?.model ? getModelDisplayName(u.model) : '';
+                const promptText = msg.content.replace(/[\t\r\n]+/g, ' ').trim();
+                const inputTok = u?.inputTokens ?? '';
+                const outputTok = u?.outputTokens ?? '';
+                const totalTok = (u?.inputTokens !== undefined || u?.outputTokens !== undefined)
+                    ? (u!.inputTokens || 0) + (u!.outputTokens || 0) : '';
+                const aic = u?.aic !== undefined ? u!.aic.toFixed(2) : '';
+                const usd = u?.aic !== undefined ? (computeUsd(u!.aic)?.toFixed(4) ?? '') : '';
+                const sessionTitle = session?.title ?? '';
+
+                const values = [fmtDate, sessionTitle, model, promptText, String(inputTok), String(outputTok), String(totalTok), aic, usd];
+                rows.push(values.join('\t'));
+            }
+
+            const tsv = rows.join('\r\n');
+            vscode.env.clipboard.writeText(tsv);
+            vscode.window.showInformationMessage(`Copied ${messagesToCopy.length} prompt(s) — paste into Excel or Google Sheets.`);
         })
     );
 
@@ -384,7 +463,7 @@ function scheduleRefresh(): void {
         try {
             await chatHistoryProvider.refresh();
             historyTreeProvider.refresh();
-            searchViewProvider.updateFilterStats();
+            filterViewProvider.updateFilterStats();
         } catch (err) {
             console.error('[CopilotReport] Auto-refresh failed:', err);
         }
