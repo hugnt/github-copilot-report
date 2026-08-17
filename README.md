@@ -4,117 +4,129 @@ A VS Code extension that turns your **local GitHub Copilot chat history** into a
 
 Everything runs **100% locally**. No data ever leaves your machine.
 
-> Built on top of the excellent [copilot-chat-history-search](https://github.com/jeevananthamp16/copilot-chat-history-search) by @jeevananthamp16, extended with token/AIC accounting, time filters and Excel export.
+---
+
+## 1. Introduction
+
+**Github Copilot Report** is built to give you clear visibility into your Copilot usage. By default, GitHub Copilot Chat doesn't show how many AI Credits (AIC) are consumed per prompt or provide an easy way to export old chat history. 
+
+This extension solves that by reading your local chat logs and presenting a clean, filterable interface with actual billed credits, making it easy to track your AI costs. It is built on top of the excellent [copilot-chat-history-search](https://github.com/jeevananthamp16/copilot-chat-history-search) by @jeevananthamp16 and [github-copilot-chat-usage](https://github.com/ailmind/github-copilot-chat-usage) by @ailmind.
 
 ---
 
-## Screenshots
+## 2. Screenshots
 
+### Sidebar & Filter Options
 <p align="center">
-  <img src="media/screenshots/sidebar.png" alt="Copilot Report sidebar — time filter, live Chats / Prompts / Tokens / AIC / USD totals, and Recent Chats grouped by day with a token · AIC · $ badge on every prompt" width="420">
+  <img src="media/screenshots/sidebar.png" alt="Copilot Report sidebar — time filter, live totals, and Recent Chats" width="400">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="media/screenshots/filter_options.png" alt="Filter Options panel" width="400">
 </p>
+<em>The sidebar (left): pick a time range, read the live **Chats · Prompts · Tokens · AIC · USD** totals, and browse **Recent Chats**. Filter Options (right): search or filter your usage easily. (Note: Add `filter_options.png` to `media/screenshots/`)</em>
 
-_The sidebar: pick a time range, read the live **Chats · Prompts · Tokens · AIC · USD** totals, and browse **Recent Chats** where every prompt is annotated with its `token · AIC · $` usage._
+### Excel Export
+<p align="center">
+  <img src="media/screenshots/export_excel.png" alt="Excel Export showing Summary and Prompts" width="600">
+</p>
+<em>Export your filtered history to a detailed Excel file with Summary and Prompts sheets. (Note: Add this screenshot to `media/screenshots/export_excel.png`)</em>
 
 ---
 
-## Features
+## 3. Installation & Usage Guide
 
-- **Sidebar activity-bar view** with two panels:
-  - **Filter & Search** (webview) — time-range dropdown, live totals, and content/title search.
-  - **Recent Chats** (tree) — your chats grouped by day, each prompt annotated with its usage.
-- **Token / AIC / USD per prompt.** Every user prompt shows a badge like `▲ 35k  ▼ 252  ·  10.9 AIC  ·  $0.11`:
-  - `▲` input (prompt) tokens · `▼` output (completion) tokens · **AIC** · estimated **USD** cost.
-- **Time filter.** Choose **This Week** (Mon–Sun) or **This Month** — *defaults to the current month*. There is also an **All time** option.
-- **Excel export.** One click exports everything in the current filter to an `.xlsx` with a **Summary** sheet (totals, by-model, by-day) and a **Prompts** sheet (one row per prompt with tokens & AIC).
-- **Copy to clipboard.** The **📋 Copy** button (left of Export) copies the filtered table as tab-separated text — paste it straight into Excel or Google Sheets.
-- **Pick your columns.** On export you tick which fields to include. The necessary ones — *#, Session, Model, Prompt, AIC, USD (est.), Input/Output/Total Tokens, Date* — are pre-selected in that order; optional ones (Workspace, Response) are one click away. Your choice is remembered and shared by both Copy and Export. The **Summary** sheet also breaks USD down by model and by day, and prints the `1 AIC = $x` rate it used.
+### Installation
 
-## What is "AIC"? And the USD estimate
+**Option 1 — Install from the VS Code Marketplace:**
+1. Open the **Extensions** panel (`Ctrl+Shift+X`).
+2. Search for **"Github Copilot Report"**.
+3. Click **Install**.
 
-GitHub Copilot's usage-based billing charges each request in **AICs (AI Credits)**. This extension reports AIC **exactly the way [ailmind/github-copilot-chat-usage](https://github.com/ailmind/github-copilot-chat-usage) does** — straight from the credits Copilot actually billed, never from a token × published-rate guess.
-
-**AIC per prompt** is read in this priority order, all sourced from the request's own record in the `.jsonl` session file:
-
-1. The `nanoAiu` (a.k.a. `copilotUsageNanoAiu`) field Copilot writes once it has billed the request: `AIC = nanoAiu / 1e9`.
-2. If that field isn't present yet, the human-readable usage line Copilot writes into `result.details` once billing is reconciled — e.g. `"Raptor mini • 2.0 credits"` — is parsed for the credit amount.
-
-If neither is present, the prompt's AIC/USD is shown as `—` (unknown) rather than an estimate, and the session/period total is marked with a `+` to flag it as a lower bound. There is **no per-model pricing table or formula involved** — this avoids ever showing a number that doesn't match what GitHub actually bills.
-
-**USD estimate.** GitHub draws your budget down at a fixed rate of **1 AI credit = $0.01 USD** (a $10 budget = 1,000 credits — see [GitHub's usage‑based billing docs](https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals)):
-
+**Option 2 — Install from VSIX:**
+Download the `.vsix` package from the repository and run:
+```bash
+code --install-extension github-copilot-report-1.x.x.vsix
 ```
-USD = AIC × usdPerAic          (usdPerAic defaults to 0.01)
-```
+*(Or in VS Code: **Extensions** panel → `...` menu → **Install from VSIX...**)*
 
-Model **display names** (e.g. "Claude Sonnet 4.6" instead of `claude-sonnet-4-6`) are cosmetic only and don't affect AIC/USD — they're read from your chat data when present, with a built-in fallback table for known models.
+### Usage
 
-## How it reads your data
+1. **Open the Extension**: Click the **Copilot Report** icon in the activity bar on the left.
+2. **Filter & Search**: Pick a time range in the dropdown (defaults to *This Month*). You can also search for specific content or titles. Shortcut: `Ctrl+Alt+H` (`Cmd+Alt+H` on macOS).
+3. **View Chats**: Browse **Recent Chats**. Expand any chat to see each prompt alongside a badge showing token counts, AIC, and USD estimate.
+4. **Export**: 
+   - Click the **⬇ Excel** button (or the export icon in the tree title bar) to save an `.xlsx` report.
+   - Click the **📋 Copy** button to copy the table as tab-separated text and paste it into Google Sheets or Excel.
+5. **Pick Export Columns**: On export, you can tick which fields to include. Your choice is saved for future exports.
 
-The extension parses the Copilot chat session files VS Code stores locally:
+---
 
-```
-%APPDATA%\Code\User\workspaceStorage\<id>\chatSessions\*.jsonl   (Windows)
-~/Library/Application Support/Code/User/...                       (macOS)
-~/.config/Code/User/...                                           (Linux)
-```
+## 4. Details & Features
 
-Each `.jsonl` is a delta log; the extension reconstructs each request and joins it with the
-result metadata (`promptTokens`, `outputTokens`, `resolvedModel`) that Copilot writes for it.
+### The Problem it Solves
+GitHub Copilot Chat lacks clear visibility into:
+- **Actual cost incurred**: Copilot bills usage-based plans in AIC, but there's no UI for credits per prompt.
+- **Old chat history**: Scattered across `.jsonl` files per workspace.
+- **Aggregate reporting**: Hard to roll up usage by week/month/model, or export for tracking.
 
-Session titles are read from `state.vscdb` when the `sqlite3` CLI is available; otherwise the
-first prompt is used as the title. **Token/AIC data does not depend on sqlite3** — it comes
-straight from the `.jsonl` files.
+### How it Works
+This extension reads the Copilot chat session files VS Code stores locally:
+- **Windows:** `%APPDATA%\Code\User\workspaceStorage\<id>\chatSessions\*.jsonl`
+- **macOS:** `~/Library/Application Support/Code/User/...`
+- **Linux:** `~/.config/Code/User/...`
 
-## Settings
+It reconstructs each request and joins it with the result metadata (`promptTokens`, `outputTokens`, `resolvedModel`) that Copilot writes. Session titles are retrieved from `state.vscdb` (if `sqlite3` is available) or inferred from the first prompt.
+
+### Token, AIC, and USD Calculation
+GitHub charges usage-based plans in **AICs (AI Credits)**. This extension reports AIC straight from the actual billed credits, never from a guess!
+
+**AIC per prompt** is read in this priority:
+1. The `nanoAiu` field Copilot writes after billing: `AIC = nanoAiu / 1e9`.
+2. The human-readable usage line in `result.details` (e.g., `"Raptor mini • 2.0 credits"`).
+
+If neither is found, it shows `—` to avoid inaccurate guesses, and the total is marked with a `+` as a lower bound.
+
+**USD estimate** uses GitHub's fixed rate:
+`USD = AIC × usdPerAic` (defaults to `0.01`).
+
+### Key Features
+- **Sidebar view** with two panels: **Filter & Search** and **Recent Chats**.
+- **Token / AIC / USD per prompt** badges (e.g., `▲ 35k  ▼ 252  ·  10.9 AIC  ·  $0.11`).
+- **Time filters**: This Week, This Month, or All time.
+- **Excel Export**: Detailed workbook with Summary (totals by model/day) and Prompts sheets.
+- **Clipboard Copy**: Tab-separated copy for easy spreadsheet pasting.
+
+---
+
+## 5. Settings
+
+You can customize the extension via VS Code settings:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `githubCopilotReport.defaultFilter` | `month` | Time range applied on startup: `week`, `month`, or `all`. |
-| `githubCopilotReport.storagePath` | `""` | Custom path to the VS Code `User` folder (for Insiders/portable). |
+| `githubCopilotReport.defaultFilter` | `month` | Time range applied on startup (`week`, `month`, `all`). |
+| `githubCopilotReport.storagePath` | `""` | Custom path to the VS Code `User` folder. |
 | `githubCopilotReport.maxResults` | `200` | Max search results. |
 | `githubCopilotReport.fuzzyThreshold` | `0.4` | Fuzzy search threshold (0 = exact … 1 = anything). |
-| `githubCopilotReport.usdPerAic` | `0.01` | USD value of one AIC. Drives the `$` estimate shown next to every AIC figure. GitHub's rate is `1 AIC = $0.01`; change only if your plan differs. Takes effect after a **Refresh**. |
+| `githubCopilotReport.usdPerAic` | `0.01` | USD value of one AIC (`1 AIC = $0.01`). Update if your plan differs and **Refresh**. |
 
-## Where the conversion-rate numbers live (what to edit)
+---
 
-These are the numbers that **decide** the AIC → USD math. If you ever need to correct or tune them, this is exactly where:
-
-| What it controls | Change it at runtime (no rebuild) | Change the built-in default (code) |
-| --- | --- | --- |
-| **AIC → USD rate** (the money knob, `1 AIC = $0.01`) | Setting `githubCopilotReport.usdPerAic` | `DEFAULT_USD_PER_AIC` in [src/modelPricing.ts](src/modelPricing.ts) |
-| **Actual credits divisor** (`nanoAiu / 1e9`) | — | `NANO_AIU_PER_AIC` in [src/modelPricing.ts](src/modelPricing.ts) |
-| **Which fields count as billed credits** (`nanoAiu`, `copilotUsageNanoAiu`, the `"X credits"` text) | — | `extractNanoAiu()` / `parseCreditsFromDetails()` in [src/chatHistoryProvider.ts](src/chatHistoryProvider.ts) |
-
-After changing a **setting**, click **↻ Refresh** in the panel to re-index with the new rate. After changing **code**, run `npm run compile` and reload the Extension Host.
-
-## Usage
-
-1. Open the **Copilot Report** icon in the activity bar.
-2. Pick a time range in the dropdown (defaults to *This Month*).
-3. Browse **Recent Chats**; expand a chat to see each prompt with its token/AIC badge.
-4. Click the **⬇ Excel** button (or the export icon in the tree title bar) to save the report.
-
-Keyboard: `Ctrl+Alt+H` (`Cmd+Alt+H` on macOS) to search.
-
-## Development
+## 6. Development
 
 ```bash
 npm install
 npm run compile     # bundle to out/extension.js (esbuild)
 npm run watch       # rebuild on change
 ```
-
 Press `F5` in VS Code to launch an Extension Development Host.
 
-## Acknowledgments
+---
 
-This extension stands on the shoulders of two great open-source projects — thank you 🙏 It combines and builds on ideas from both:
+## 7. Acknowledgments
 
+This extension combines and builds on ideas from two great open-source projects:
 - **[copilot-chat-history-search](https://github.com/jeevananthamp16/copilot-chat-history-search)** by [@jeevananthamp16](https://github.com/jeevananthamp16) — the foundation for reading and searching VS Code's local Copilot chat session files.
-- **[github-copilot-chat-usage](https://github.com/ailmind/github-copilot-chat-usage)** by [@ailmind](https://github.com/ailmind) — this extension's AIC/USD accounting (`extractNanoAiu()` in [src/chatHistoryProvider.ts](src/chatHistoryProvider.ts)) mirrors that project's credit extraction logic field-for-field: the actual billed credits (`nanoAiu` / `copilotUsageNanoAiu`, or the `"X credits"` text in `result.details`) and the `1 AIC = $0.01 USD` rate. No token × price estimate is used — a prompt without recorded credits shows `—` rather than a guess.
-
-The chat-history search & parsing come from the first; the AIC → USD accounting model is a direct port of the second. This project merges the two and adds time filters, per-prompt token/AIC/USD badges, and Excel export.
+- **[github-copilot-chat-usage](https://github.com/ailmind/github-copilot-chat-usage)** by [@ailmind](https://github.com/ailmind) — the AIC/USD accounting model, credit extraction logic, and the `1 AIC = $0.01 USD` rate.
 
 ## License
 
