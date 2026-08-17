@@ -22,13 +22,13 @@ This extension solves that by reading your local chat logs and presenting a clea
   &nbsp;&nbsp;&nbsp;&nbsp;
   <img src="media/screenshots/filter_options.png" alt="Filter Options panel" width="400">
 </p>
-<em>The sidebar (left): pick a time range, read the live **Chats · Prompts · Tokens · AIC · USD** totals, and browse **Recent Chats**. Filter Options (right): search or filter your usage easily. (Note: Add `filter_options.png` to `media/screenshots/`)</em>
+<em>The sidebar (left): pick a time range, read the live **Chats · Prompts · Tokens · AIC · USD** totals, and browse **Recent Chats**. Filter Options (right): search or filter your usage easily.</em>
 
 ### Excel Export
 <p align="center">
   <img src="media/screenshots/export_excel.png" alt="Excel Export showing Summary and Prompts" width="600">
 </p>
-<em>Export your filtered history to a detailed Excel file with Summary and Prompts sheets. (Note: Add this screenshot to `media/screenshots/export_excel.png`)</em>
+<em>Export your filtered history to a detailed Excel file with Summary and Prompts sheets.</em>
 
 ---
 
