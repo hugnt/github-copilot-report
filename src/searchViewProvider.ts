@@ -22,7 +22,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
             enableScripts: true,
             localResourceRoots: [this._extensionUri]
         };
-        webviewView.webview.html = this._getHtmlForWebview();
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.type) {
@@ -57,14 +57,16 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
         this._view?.webview.postMessage({ type: 'sessionResults', sessions, query });
     }
 
-    private _getHtmlForWebview(): string {
+    private _getHtmlForWebview(webview: vscode.Webview): string {
         const nonce = getNonce();
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'codicons', 'codicon.css'));
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Copilot Report</title>
+<link href="${codiconsUri}" rel="stylesheet" />
 <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -122,7 +124,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
 
     <div class="row-actions">
         <span style="font-size:11px;color:var(--vscode-descriptionForeground)">Ctrl/Cmd+Alt+H to search</span>
-        <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
+        <button class="refresh-btn" id="refreshBtn"><i class="codicon codicon-refresh"></i> Refresh</button>
     </div>
 
     <div id="resultsContainer">
@@ -177,7 +179,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
 
     function displayResults(results, query) {
         if (!results.length) {
-            resultsContainer.innerHTML = '<div class="no-results"><div class="no-results-icon">🔍</div><div>No results for "' + escapeHtml(query) + '"</div></div>';
+            resultsContainer.innerHTML = '<div class="no-results"><div class="no-results-icon"><i class="codicon codicon-search"></i></div><div>No results for "' + escapeHtml(query) + '"</div></div>';
             return;
         }
         resultsContainer.innerHTML = '<div class="results-header">' + results.length + ' result' + (results.length === 1 ? '' : 's') + '</div>';
@@ -195,7 +197,7 @@ export class SearchViewProvider implements vscode.WebviewViewProvider {
 
     function displaySessionResults(sessions, query) {
         if (!sessions.length) {
-            resultsContainer.innerHTML = '<div class="no-results"><div class="no-results-icon">📁</div><div>No sessions matching "' + escapeHtml(query) + '"</div></div>';
+            resultsContainer.innerHTML = '<div class="no-results"><div class="no-results-icon"><i class="codicon codicon-files"></i></div><div>No sessions matching "' + escapeHtml(query) + '"</div></div>';
             return;
         }
         resultsContainer.innerHTML = '<div class="results-header">' + sessions.length + ' session' + (sessions.length === 1 ? '' : 's') + '</div>';

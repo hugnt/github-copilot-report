@@ -85,7 +85,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             return [];
         }
         const items: ChatTreeItem[] = [];
-        const header = new ChatTreeItem(`🔍 Search Results (${this.searchResults.length})`, vscode.TreeItemCollapsibleState.None);
+        const header = new ChatTreeItem(`Search Results (${this.searchResults.length})`, vscode.TreeItemCollapsibleState.None);
         header.description = 'Click to clear';
         header.command = { command: 'githubCopilotReport.clearSearch', title: 'Clear Search' };
         items.push(header);
@@ -181,7 +181,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
         const items: ChatTreeItem[] = [];
 
         // Summary header.
-        const summary = new ChatTreeItem(`📊 ${this.range.label}`, vscode.TreeItemCollapsibleState.None);
+        const summary = new ChatTreeItem(this.range.label, vscode.TreeItemCollapsibleState.None);
         summary.description = `${filtered.length} chats · ${totalPrompts} prompts · ${formatAic(totalAic)}${aicComplete ? '' : '+'} AIC · ${formatUsd(computeUsd(totalAic))}`;
         summary.tooltip = new vscode.MarkdownString(
             `**${this.range.label}**\n\n` +
@@ -251,8 +251,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
         const isUser = msg.role === 'user';
         const previewLen = isUser ? 70 : 60;
         const preview = msg.content.replace(/\s+/g, ' ').substring(0, previewLen) + (msg.content.length > previewLen ? '…' : '');
-        const icon = isUser ? '👤' : '🤖';
-        const item = new ChatTreeItem(`${icon} ${preview}`, vscode.TreeItemCollapsibleState.None, undefined, msg);
+        const item = new ChatTreeItem(preview, vscode.TreeItemCollapsibleState.None, undefined, msg);
         item.iconPath = new vscode.ThemeIcon(isUser ? 'account' : 'copilot');
 
         const hasUsage = isUser && msg.usage &&
@@ -261,7 +260,7 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
             const u = msg.usage!;
             const total = (u.inputTokens || 0) + (u.outputTokens || 0);
             // The token / AIC / USD badge shown next to each prompt.
-            item.description = `▲${formatTokens(u.inputTokens)} ▼${formatTokens(u.outputTokens)} · ${formatAic(u.aic)} AIC · ${formatUsd(computeUsd(u.aic))}`;
+            item.description = `Input: ${formatTokens(u.inputTokens)} · Output: ${formatTokens(u.outputTokens)} · ${formatAic(u.aic)} AIC · ${formatUsd(computeUsd(u.aic))}`;
             item.tooltip = new vscode.MarkdownString(
                 `**Prompt** · ${this.formatTimestamp(msg.timestamp)}\n\n` +
                 `${this.mdEscape(msg.content.substring(0, 400))}\n\n---\n` +
@@ -294,15 +293,15 @@ export class HistoryTreeProvider implements vscode.TreeDataProvider<ChatTreeItem
         const d = new Date(ts);
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
         if (dayStart >= today) {
-            return '📅 Today';
+            return 'Today';
         }
         if (dayStart >= yesterday) {
-            return '📅 Yesterday';
+            return 'Yesterday';
         }
         if (this.range.mode === 'all' && (today - dayStart) > 60 * 86400000) {
-            return `📅 ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+            return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
         }
-        return `📅 ${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()].substring(0, 3)} ${d.getDate()}`;
+        return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()].substring(0, 3)} ${d.getDate()}`;
     }
 
     // Splits each session's messages by the calendar day they were actually

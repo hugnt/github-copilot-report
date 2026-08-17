@@ -27,7 +27,7 @@ export class FilterViewProvider implements vscode.WebviewViewProvider {
             enableScripts: true,
             localResourceRoots: [this._extensionUri]
         };
-        webviewView.webview.html = this._getHtmlForWebview();
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.type) {
@@ -72,14 +72,16 @@ export class FilterViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private _getHtmlForWebview(): string {
+    private _getHtmlForWebview(webview: vscode.Webview): string {
         const nonce = getNonce();
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'codicons', 'codicon.css'));
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Copilot Filter</title>
+<title>Copilot Report Filter</title>
+<link href="${codiconsUri}" rel="stylesheet" />
 <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -147,16 +149,16 @@ export class FilterViewProvider implements vscode.WebviewViewProvider {
 <body>
     <div class="filter-bar">
         <select class="filter-select" id="filterSelect" title="Time range">
-            <option value="month">📅 This Month</option>
-            <option value="today">📅 Today</option>
-            <option value="yesterday">📅 Yesterday</option>
-            <option value="week">🗓️ This Week</option>
-            <option value="pickedMonth">🗓️ Pick Month…</option>
-            <option value="range">📆 Custom Range…</option>
-            <option value="all">♾️ All time</option>
+            <option value="month">This Month</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="week">This Week</option>
+            <option value="pickedMonth">Pick Month…</option>
+            <option value="range">Custom Range…</option>
+            <option value="all">All time</option>
         </select>
-        <button class="copy-btn" id="copyBtn" title="Copy the filtered table to the clipboard (paste into Excel / Google Sheets)">📋 Copy</button>
-        <button class="export-btn" id="exportBtn" title="Export the filtered data to an Excel file">⬇ Excel</button>
+        <button class="copy-btn" id="copyBtn" title="Copy the filtered table to the clipboard (paste into Excel / Google Sheets)"><i class="codicon codicon-copy"></i> Copy</button>
+        <button class="export-btn" id="exportBtn" title="Export the filtered data to an Excel file"><i class="codicon codicon-export"></i> Excel</button>
     </div>
 
     <div class="custom-filter-bar" id="rangeBar">

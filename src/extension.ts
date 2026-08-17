@@ -45,6 +45,8 @@ export function activate(context: vscode.ExtensionContext) {
         showCollapseAll: true
     });
 
+    ChatViewerPanel.init(context.extensionUri);
+
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('githubCopilotReport.filterView', filterViewProvider),
         vscode.window.registerWebviewViewProvider('githubCopilotReport.searchView', searchViewProvider)

@@ -25,6 +25,7 @@ function usageBadge(msg: ChatMessage): string {
  */
 export class ChatViewerPanel {
     public static currentPanel: ChatViewerPanel | undefined;
+    private static _extensionUri: vscode.Uri;
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
     private _currentSession: ChatSession | undefined;
@@ -82,6 +83,10 @@ export class ChatViewerPanel {
         );
     }
 
+    public static init(extensionUri: vscode.Uri) {
+        ChatViewerPanel._extensionUri = extensionUri;
+    }
+
     public static show(session: ChatSession, highlightMessage?: ChatMessage, highlightMessageIndex?: number) {
         const column = vscode.ViewColumn.Beside;
 
@@ -107,7 +112,7 @@ export class ChatViewerPanel {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: []
+                localResourceRoots: [vscode.Uri.joinPath(ChatViewerPanel._extensionUri, 'media')]
             }
         );
 
@@ -267,6 +272,7 @@ export class ChatViewerPanel {
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <link href="${this._panel.webview.asWebviewUri(vscode.Uri.joinPath(ChatViewerPanel._extensionUri, 'media', 'codicons', 'codicon.css'))}" rel="stylesheet" />
     <style>
         :root {
             --vscode-editor-background: #1e1e1e;
@@ -946,9 +952,9 @@ export class ChatViewerPanel {
         
         const highlightClass = isHighlighted ? ' highlighted' : '';
         const anchorClass = isHighlighted ? ' highlight-anchor' : '';
-        const roleIcon = msg.role === 'user' ? '👤' : '🤖';
-        
-        // Show message index badge on highlighted messages
+        const messageClass = msg.role === 'user' ? 'user-message' : 'assistant-message';
+        const roleName = msg.role === 'user' ? 'User' : 'Copilot';
+        const roleIcon = msg.role === 'user' ? '<i class="codicon codicon-account"></i>' : '<i class="codicon codicon-copilot"></i>';
         const indexBadge = isHighlighted ? `<span class="message-index">${index + 1}</span>` : '';
         
         // Process content with markdown-like formatting
@@ -967,14 +973,14 @@ export class ChatViewerPanel {
                     const displayPath = link.path.split('/').slice(-2).join('/');
                     const lineInfo = link.lineNumber ? `:${link.lineNumber}` : '';
                     const existsClass = link.exists ? '' : ' missing';
-                    const actionIcon = link.action === 'created' ? '✨' : link.action === 'deleted' ? '🗑️' : '📝';
-                    const actionLabel = link.action || 'modified';
+                    const actionIcon = link.action === 'created' ? '<i class="codicon codicon-new-file"></i>' : link.action === 'deleted' ? '<i class="codicon codicon-trash"></i>' : '<i class="codicon codicon-edit"></i>';
+                    const actionLabel = link.action === 'created' ? 'Created' : link.action === 'deleted' ? 'Deleted' : 'Edited';
                     return `<div class="file-update-item${existsClass}" data-path="${this._escapeHtml(link.path)}"${link.lineNumber ? ` data-line="${link.lineNumber}"` : ''}>${actionIcon} <span class="action">${actionLabel}</span> ${this._escapeHtml(displayPath)}${lineInfo}</div>`;
                 }).join('');
                 
                 fileLinksHtml += `
                 <div class="files-updated">
-                    <div class="files-updated-header">🔧 Files Changed (${modifiedFiles.length})</div>
+                    <div class="files-updated-header"><i class="codicon codicon-tools"></i> Files Changed (${modifiedFiles.length})</div>
                     <div class="files-list">${modifiedItems}</div>
                 </div>`;
             }
@@ -985,13 +991,13 @@ export class ChatViewerPanel {
                     const displayPath = link.path.split('/').slice(-2).join('/');
                     const lineInfo = link.lineNumber ? `:${link.lineNumber}` : '';
                     const existsClass = link.exists ? '' : ' missing';
-                    const existsIcon = link.exists ? '📄' : '❌';
+                    const existsIcon = link.exists ? '<i class="codicon codicon-file"></i>' : '<i class="codicon codicon-error"></i>';
                     return `<span class="file-link-item${existsClass}" data-path="${this._escapeHtml(link.path)}"${link.lineNumber ? ` data-line="${link.lineNumber}"` : ''}>${existsIcon} ${this._escapeHtml(displayPath)}${lineInfo}</span>`;
                 }).join('');
                 
                 fileLinksHtml += `
                 <div class="files-referenced">
-                    <div class="files-header">📁 Files Referenced (${referencedFiles.length})</div>
+                    <div class="files-header"><i class="codicon codicon-files"></i> Files Referenced (${referencedFiles.length})</div>
                     <div class="files-list">${linkItems}</div>
                 </div>`;
             }
@@ -1011,8 +1017,8 @@ export class ChatViewerPanel {
                         ${msg.role === 'user' ? usageBadge(msg) : ''}
                     </div>
                     <div class="message-actions">
-                        <button class="msg-action-btn copy-btn" onclick="copyMessage(${index})" title="Copy message">📋</button>
-                        <button class="msg-action-btn export-btn" onclick="exportMessage(${index})" title="Export message">📤</button>
+                        <button class="msg-action-btn copy-btn" onclick="copyMessage(${index})" title="Copy message"><i class="codicon codicon-copy"></i></button>
+                        <button class="msg-action-btn export-btn" onclick="exportMessage(${index})" title="Export message"><i class="codicon codicon-export"></i></button>
                     </div>
                 </div>
                 <div class="message-content" data-raw="${escapedContent}">
