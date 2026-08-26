@@ -16,6 +16,7 @@ const CONFIG_NS = 'githubCopilotReport';
 // silently override the new "necessary fields only" default for users who never touched the picker.
 const EXPORT_COLS_KEY = 'githubCopilotReport.exportColumns.v2';
 const EXPORT_SORT_KEY = 'githubCopilotReport.exportSortOrder';
+const LAST_VERSION_KEY = 'githubCopilotReport.lastActivatedVersion';
 
 let extensionContext: vscode.ExtensionContext;
 let chatHistoryProvider: ChatHistoryProvider;
@@ -61,6 +62,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     registerCommands(context);
+    checkForVersionUpdate(context);
 
     // Initial index.
     vscode.window.withProgress(
@@ -76,6 +78,29 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(treeView, filterState, {
         dispose: () => cleanupWatchers()
     });
+}
+
+/**
+ * VS Code's "Update" + "Restart Extensions" only restarts the Extension Host, not the window —
+ * existing webviews (Filter/Search sidebar views, Chat Viewer panel) can keep running the
+ * previous version's stale HTML/JS/asset URIs until a full window reload. Detect the version
+ * bump and prompt the user to reload so the update actually takes effect.
+ */
+function checkForVersionUpdate(context: vscode.ExtensionContext): void {
+    const currentVersion = context.extension.packageJSON.version as string;
+    const lastVersion = context.globalState.get<string>(LAST_VERSION_KEY);
+    context.globalState.update(LAST_VERSION_KEY, currentVersion);
+
+    if (lastVersion && lastVersion !== currentVersion) {
+        vscode.window.showInformationMessage(
+            `GitHub Copilot Report updated to v${currentVersion}. Reload the window to apply it fully.`,
+            'Reload Window'
+        ).then(choice => {
+            if (choice === 'Reload Window') {
+                vscode.commands.executeCommand('workbench.action.reloadWindow');
+            }
+        });
+    }
 }
 
 function registerCommands(context: vscode.ExtensionContext) {

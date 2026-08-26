@@ -64,6 +64,9 @@ const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
     'gpt-5.4-mini': 'GPT-5.4 mini',
     'gpt-5.4-nano': 'GPT-5.4 nano',
     'gpt-5.5': 'GPT-5.5',
+    'gpt-5.6-luna': 'GPT-5.6 Luna',
+    'gpt-5.6-sol': 'GPT-5.6 Sol',
+    'gpt-5.6-terra': 'GPT-5.6 Terra',
 
     // ── Anthropic ───────────────────────────────────────────────────────────
     'claude-haiku-4.5': 'Claude Haiku 4.5',
@@ -76,6 +79,7 @@ const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
     'claude-opus-4.7': 'Claude Opus 4.7',
     'claude-opus-4.8': 'Claude Opus 4.8',
     'claude-opus-4.8-fast': 'Claude Opus 4.8 (fast mode)',
+    'claude-opus-5': 'Claude Opus 5',
     'claude-fable-5': 'Claude Fable 5',
 
     // ── Google ──────────────────────────────────────────────────────────────
@@ -83,12 +87,20 @@ const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
     'gemini-3-flash': 'Gemini 3 Flash',
     'gemini-3.1-pro': 'Gemini 3.1 Pro',
     'gemini-3.5-flash': 'Gemini 3.5 Flash',
+    'gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'gemini-3.7-flash': 'Gemini 3.7 Flash',
 
     // ── Microsoft ───────────────────────────────────────────────────────────
     'mai-code-1-flash': 'MAI-Code-1-Flash',
+    'mai-code-1.1-flash': 'MAI-Code-1.1-Flash',
 
     // ── Moonshot AI ─────────────────────────────────────────────────────────
     'kimi-k2.7-code': 'Kimi K2.7 Code',
+    'kimi-k3': 'Kimi K3',
+
+    // ── xAI ─────────────────────────────────────────────────────────────────
+    'grok-4.5': 'Grok 4.5',
+    'grok-4.6': 'Grok 4.6',
 
     // ── GitHub fine-tuned ───────────────────────────────────────────────────
     'raptor-mini': 'Raptor mini'
