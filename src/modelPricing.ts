@@ -47,42 +47,62 @@ export function computeUsd(aic: number | undefined): number | undefined {
 /**
  * Friendly display names for models GitHub Copilot currently offers. Purely cosmetic —
  * unrelated model ids fall back to their raw id. Kept in sync with
- * https://docs.github.com/en/copilot/reference/ai-models/supported-models.
+ * https://docs.github.com/en/copilot/reference/ai-models/supported-models
+ * (last verified: October 2025).
  *
  * Keyed in the models' canonical "." version form (as the docs write them, e.g.
  * "claude-haiku-4.5"), NOT the "-" form Copilot's own storage actually uses
  * ("claude-haiku-4-5"). `getModelDisplayName()` tries the "." form first and only falls back
  * to a "-"-normalized lookup when that misses — see the comment there for why.
+ *
+ * Older / deprecated entries are intentionally kept as lookup fallbacks so that
+ * historical chat logs with those model ids still resolve to a friendly name.
  */
 const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
     // ── OpenAI ──────────────────────────────────────────────────────────────
-    'gpt-4.1': 'GPT-4.1',
-    'gpt-4o': 'GPT-4o',
-    'gpt-5-mini': 'GPT-5 mini',
+    // GA models (per official docs)
     'gpt-5.3-codex': 'GPT-5.3-Codex',
-    'gpt-5.4': 'GPT-5.4',
-    'gpt-5.4-mini': 'GPT-5.4 mini',
     'gpt-5.4-nano': 'GPT-5.4 nano',
-    'gpt-5.5': 'GPT-5.5',
     'gpt-5.6-luna': 'GPT-5.6 Luna',
     'gpt-5.6-sol': 'GPT-5.6 Sol',
     'gpt-5.6-terra': 'GPT-5.6 Terra',
+    'gpt-6-astra': 'GPT-6 Astra',
+    'gpt-6-luna': 'GPT-6 Luna',
+    'gpt-6-sol': 'GPT-6 Sol',
+    'gpt-6.1-sol': 'GPT-6.1 Sol',
+    // Legacy / historical aliases (kept for old chat log resolution)
+    'gpt-4.1': 'GPT-4.1',
+    'gpt-4o': 'GPT-4o',
+    'gpt-5-mini': 'GPT-5 mini',
+    'gpt-5.4': 'GPT-5.4',
+    'gpt-5.4-mini': 'GPT-5.4 mini',
+    'gpt-5.5': 'GPT-5.5',
 
     // ── Anthropic ───────────────────────────────────────────────────────────
+    // GA models (per official docs)
+    'claude-fable-5': 'Claude Fable 5',
+    'claude-fable-5.1': 'Claude Fable 5.1',
     'claude-haiku-4.5': 'Claude Haiku 4.5',
-    'claude-sonnet-4': 'Claude Sonnet 4',
-    'claude-sonnet-4.5': 'Claude Sonnet 4.5',
-    'claude-sonnet-4.6': 'Claude Sonnet 4.6',
-    'claude-sonnet-5': 'Claude Sonnet 5',
-    'claude-opus-4.5': 'Claude Opus 4.5',
-    'claude-opus-4.6': 'Claude Opus 4.6',
-    'claude-opus-4.7': 'Claude Opus 4.7',
+    'claude-haiku-5.5': 'Claude Haiku 5.5',
     'claude-opus-4.8': 'Claude Opus 4.8',
     'claude-opus-4.8-fast': 'Claude Opus 4.8 (fast mode)',
     'claude-opus-5': 'Claude Opus 5',
-    'claude-fable-5': 'Claude Fable 5',
+    'claude-opus-5.5': 'Claude Opus 5.5',
+    'claude-sonnet-4.6': 'Claude Sonnet 4.6',
+    'claude-sonnet-5': 'Claude Sonnet 5',
+    'claude-sonnet-5.5': 'Claude Sonnet 5.5',
+    // Legacy / historical aliases
+    'claude-sonnet-4': 'Claude Sonnet 4',
+    'claude-sonnet-4.5': 'Claude Sonnet 4.5',
+    'claude-opus-4.5': 'Claude Opus 4.5',
+    'claude-opus-4.6': 'Claude Opus 4.6',
+    'claude-opus-4.7': 'Claude Opus 4.7',
 
     // ── Google ──────────────────────────────────────────────────────────────
+    // GA models (per official docs)
+    'gemini-3.8-flash': 'Gemini 3.8 Flash',
+    'gemini-4-argon': 'Gemini 4 Argon',
+    // Legacy / historical aliases
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
     'gemini-3-flash': 'Gemini 3 Flash',
     'gemini-3.1-pro': 'Gemini 3.1 Pro',
@@ -91,16 +111,22 @@ const DEFAULT_DISPLAY_NAMES: Record<string, string> = {
     'gemini-3.7-flash': 'Gemini 3.7 Flash',
 
     // ── Microsoft ───────────────────────────────────────────────────────────
-    'mai-code-1-flash': 'MAI-Code-1-Flash',
+    // GA models (per official docs)
     'mai-code-1.1-flash': 'MAI-Code-1.1-Flash',
+    // Legacy / historical aliases
+    'mai-code-1-flash': 'MAI-Code-1-Flash',
 
     // ── Moonshot AI ─────────────────────────────────────────────────────────
-    'kimi-k2.7-code': 'Kimi K2.7 Code',
+    // GA models (per official docs)
     'kimi-k3': 'Kimi K3',
+    // Legacy / historical aliases
+    'kimi-k2.7-code': 'Kimi K2.7 Code',
 
     // ── xAI ─────────────────────────────────────────────────────────────────
+    // GA models (per official docs)
     'grok-4.5': 'Grok 4.5',
     'grok-4.6': 'Grok 4.6',
+    'grok-4.7': 'Grok 4.7',
 
     // ── GitHub fine-tuned ───────────────────────────────────────────────────
     'raptor-mini': 'Raptor mini'

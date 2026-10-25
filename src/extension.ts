@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ChatHistoryProvider, ChatMessage, ChatSession } from './chatHistoryProvider';
+import { ChatHistoryProvider, ChatMessage, ChatSession, setReportOutputChannel, logReport } from './chatHistoryProvider';
 import { HistoryTreeProvider, ChatTreeItem } from './historyTreeProvider';
 import { SearchViewProvider } from './searchViewProvider';
 import { FilterViewProvider } from './filterViewProvider';
@@ -24,12 +24,17 @@ let historyTreeProvider: HistoryTreeProvider;
 let filterViewProvider: FilterViewProvider;
 let searchViewProvider: SearchViewProvider;
 let filterState: FilterState;
+let reportOutputChannel: vscode.OutputChannel;
 let stateDbWatchers: fs.FSWatcher[] = [];
 let refreshDebounceTimer: NodeJS.Timeout | null = null;
 let lastRefreshTime = 0;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Github Copilot Report is now active');
+    reportOutputChannel = vscode.window.createOutputChannel('Copilot Report');
+    setReportOutputChannel(reportOutputChannel);
+    context.subscriptions.push(reportOutputChannel);
+
+    logReport('Github Copilot Report is now active');
     extensionContext = context;
 
     const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
@@ -148,6 +153,12 @@ function registerCommands(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('githubCopilotReport.copyToClipboard', () => copyCurrentFilter())
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('githubCopilotReport.showLogs', () => {
+            reportOutputChannel?.show();
+        })
     );
 
     context.subscriptions.push(
@@ -458,27 +469,26 @@ async function pickExportColumns(): Promise<{ columnIds: string[]; sortOrder: Da
 /** Watch state.vscdb files so the report auto-refreshes as you chat. */
 function setupStateDbWatchers(): void {
     cleanupWatchers();
-    const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
-    const custom = cfg.get<string>('storagePath', '');
-    const base = custom && custom.trim()
-        ? (custom.startsWith('~') ? path.join(os.homedir(), custom.slice(1)) : custom)
-        : platformDefaultStorage();
-    const workspaceStoragePath = path.join(base, 'workspaceStorage');
-    if (!fs.existsSync(workspaceStoragePath)) { return; }
-
-    try {
-        for (const workspace of fs.readdirSync(workspaceStoragePath)) {
-            const stateDbPath = path.join(workspaceStoragePath, workspace, 'state.vscdb');
-            if (!fs.existsSync(stateDbPath)) { continue; }
-            try {
-                const watcher = fs.watch(stateDbPath, () => scheduleRefresh());
-                stateDbWatchers.push(watcher);
-            } catch { /* ignore unwatchable files */ }
+    const storagePaths = chatHistoryProvider.getStoragePaths();
+    for (const base of storagePaths) {
+        let workspaceStoragePath = base;
+        if (path.basename(base).toLowerCase() !== 'workspacestorage') {
+            workspaceStoragePath = path.join(base, 'workspaceStorage');
         }
-        console.log(`[CopilotReport] Watching ${stateDbWatchers.length} state.vscdb files`);
-    } catch (err) {
-        console.error('[CopilotReport] Error setting up watchers:', err);
+        if (!fs.existsSync(workspaceStoragePath)) { continue; }
+
+        try {
+            for (const workspace of fs.readdirSync(workspaceStoragePath)) {
+                const stateDbPath = path.join(workspaceStoragePath, workspace, 'state.vscdb');
+                if (!fs.existsSync(stateDbPath)) { continue; }
+                try {
+                    const watcher = fs.watch(stateDbPath, () => scheduleRefresh());
+                    stateDbWatchers.push(watcher);
+                } catch { /* ignore unwatchable files */ }
+            }
+        } catch { /* ignore */ }
     }
+    logReport(`[CopilotReport] Watching ${stateDbWatchers.length} state.vscdb files for live updates.`);
 }
 
 function scheduleRefresh(): void {
@@ -495,16 +505,6 @@ function scheduleRefresh(): void {
             console.error('[CopilotReport] Auto-refresh failed:', err);
         }
     }, 800);
-}
-
-function platformDefaultStorage(): string {
-    const homeDir = os.homedir();
-    if (process.platform === 'darwin') {
-        return path.join(homeDir, 'Library', 'Application Support', 'Code', 'User');
-    } else if (process.platform === 'win32') {
-        return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
-    }
-    return path.join(homeDir, '.config', 'Code', 'User');
 }
 
 function cleanupWatchers(): void {

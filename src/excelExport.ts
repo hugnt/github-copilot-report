@@ -90,6 +90,7 @@ function buildData(sessions: ChatSession[], range: DateRange, sortOrder: DateSor
     const byModel = new Map<string, { display: string; prompts: number; input: number; output: number; aic: number; aicComplete: boolean }>();
     const byDay = new Map<string, { prompts: number; input: number; output: number; aic: number }>();
     const chatSet = new Set<string>();
+    const seenPromptKeys = new Set<string>();
 
     for (const session of sessions) {
         if (session.isDeleted) { continue; }
@@ -106,14 +107,28 @@ function buildData(sessions: ChatSession[], range: DateRange, sortOrder: DateSor
                 continue;
             }
 
-            // user prompt
+            // Deduplication: prevent identical duplicate rows in export / clipboard
+            const promptClean = (msg.content || '').replace(/\s+/g, ' ').trim();
+            const secondTs = Math.floor(msg.timestamp / 1000);
             const u = msg.usage;
+            const model = u?.model || '';
             const input = u && typeof u.inputTokens === 'number' ? u.inputTokens : null;
             const output = u && typeof u.outputTokens === 'number' ? u.outputTokens : null;
-            const total = (input !== null || output !== null) ? (input || 0) + (output || 0) : null;
             const aic = u && typeof u.aic === 'number' ? u.aic : null;
+
+            const reqKey = u?.requestId ? `req:${u.requestId}` : null;
+            const sessionPromptKey = `s:${session.id}|${secondTs}|${promptClean}`;
+            const globalPromptKey = `g:${secondTs}|${promptClean}|${model}|${input ?? ''}|${output ?? ''}|${aic ?? ''}`;
+
+            if ((reqKey && seenPromptKeys.has(reqKey)) || seenPromptKeys.has(sessionPromptKey) || seenPromptKeys.has(globalPromptKey)) {
+                continue;
+            }
+            if (reqKey) { seenPromptKeys.add(reqKey); }
+            seenPromptKeys.add(sessionPromptKey);
+            seenPromptKeys.add(globalPromptKey);
+
+            const total = (input !== null || output !== null) ? (input || 0) + (output || 0) : null;
             const usd = aic !== null ? aic * getUsdPerAic() : null;
-            const model = u?.model || '';
 
             const row: PromptRow = {
                 date: new Date(msg.timestamp),

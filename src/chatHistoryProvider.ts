@@ -8,6 +8,20 @@ import { registerModelDisplayName, normalizeModelId, setUsdPerAic, DEFAULT_USD_P
 
 const CONFIG_NS = 'githubCopilotReport';
 
+export let reportOutputChannel: vscode.OutputChannel | undefined;
+
+export function setReportOutputChannel(channel: vscode.OutputChannel): void {
+    reportOutputChannel = channel;
+}
+
+export function logReport(...args: any[]): void {
+    const text = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    console.log(text);
+    if (reportOutputChannel) {
+        reportOutputChannel.appendLine(text);
+    }
+}
+
 /**
  * Native SQLite reader using the sqlite3 CLI (best-effort). Used only to recover
  * AI-generated session titles / archived flags. When sqlite3 is not installed the
@@ -134,6 +148,7 @@ export interface ChatSession {
 export class ChatHistoryProvider {
     private sessions: ChatSession[] = [];
     private messages: ChatMessage[] = [];
+    private sessionsById: Map<string, ChatSession> = new Map();
     private fuse: Fuse<ChatMessage> | null = null;
     private sessionTitles: Map<string, { title: string; isEmpty: boolean; isArchived: boolean }> = new Map();
     private archivedSessionIds: Set<string> = new Set();
@@ -155,6 +170,7 @@ export class ChatHistoryProvider {
     private async _doRefresh(): Promise<void> {
         this.sessions = [];
         this.messages = [];
+        this.sessionsById.clear();
         this.sessionTitles.clear();
         this.archivedSessionIds.clear();
         this.allCachedSessionIds.clear();
@@ -164,31 +180,133 @@ export class ChatHistoryProvider {
         const cfg = vscode.workspace.getConfiguration(CONFIG_NS);
         setUsdPerAic(cfg.get<number>('usdPerAic', DEFAULT_USD_PER_AIC));
 
-        const vscodePath = this.getVSCodeStoragePath();
-        console.log('[CopilotReport] Refresh, storage path:', vscodePath);
+        const vscodePaths = this.getVSCodeStoragePaths();
+        logReport(`[CopilotReport] Starting refresh. Detected storage paths: ${vscodePaths.length > 0 ? vscodePaths.join(', ') : 'none'}`);
 
-        await this.loadSessionTitles(vscodePath);
-        await this.parseWorkspaceStorage(vscodePath);
+        for (const vscodePath of vscodePaths) {
+            await this.loadSessionTitles(vscodePath);
+        }
+        for (const vscodePath of vscodePaths) {
+            await this.parseWorkspaceStorage(vscodePath);
+        }
+
+        // Keep sessions sorted by latest activity descending.
+        this.sessions = Array.from(this.sessionsById.values());
+        this.sessions.sort((a, b) => b.timestamp - a.timestamp);
+        // Build messages directly from deduplicated sessions.
+        this.messages = this.sessions.flatMap(s => s.messages);
+
         this.buildSearchIndex();
 
-        console.log('[CopilotReport] Indexed', this.sessions.length, 'sessions,', this.messages.length, 'messages');
+        logReport(`[CopilotReport] Refresh complete: ${this.sessions.length} sessions, ${this.messages.length} messages indexed.`);
+        if (this.sessions.length === 0) {
+            logReport('[CopilotReport] ℹ No Copilot chats found in storage paths. If your chats are in a custom location, specify "githubCopilotReport.storagePath" in VS Code Settings.');
+        }
     }
 
-    private getVSCodeStoragePath(): string {
+    private resolveCustomPath(rawPath: string): string[] {
+        if (!rawPath || !rawPath.trim()) {
+            return [];
+        }
+        let custom = rawPath.trim();
+        custom = custom.replace(/^["']|["']$/g, '');
+        custom = custom.replace(/%([^%]+)%/g, (_, n) => process.env[n] || _);
+        custom = custom.replace(/\$([A-Za-z0-9_]+)|\${([A-Za-z0-9_]+)}/g, (_, a, b) => process.env[a || b] || _);
+        if (custom.startsWith('~')) {
+            custom = path.join(os.homedir(), custom.slice(1));
+        }
+        custom = path.normalize(custom);
+
+        if (fs.existsSync(custom)) {
+            return [custom];
+        }
+        logReport(`[CopilotReport] Configured storagePath does not exist: ${custom}. Falling back to default paths.`);
+        return [];
+    }
+
+    public getStoragePaths(): string[] {
+        return this.getVSCodeStoragePaths();
+    }
+
+    private getVSCodeStoragePaths(): string[] {
         const config = vscode.workspace.getConfiguration(CONFIG_NS);
         const customPath = config.get<string>('storagePath', '');
-        if (customPath && customPath.trim() !== '') {
-            return customPath.startsWith('~')
-                ? path.join(os.homedir(), customPath.slice(1))
-                : customPath;
-        }
+        const resolvedCustom = this.resolveCustomPath(customPath);
+
         const homeDir = os.homedir();
-        if (process.platform === 'darwin') {
-            return path.join(homeDir, 'Library', 'Application Support', 'Code', 'User');
-        } else if (process.platform === 'win32') {
-            return path.join(homeDir, 'AppData', 'Roaming', 'Code', 'User');
+        const candidates: string[] = [];
+
+        if (resolvedCustom.length > 0) {
+            candidates.push(...resolvedCustom);
         }
-        return path.join(homeDir, '.config', 'Code', 'User');
+
+        if (process.platform === 'darwin') {
+            candidates.push(path.join(homeDir, 'Library', 'Application Support', 'Code', 'User'));
+            candidates.push(path.join(homeDir, 'Library', 'Application Support', 'Code - Insiders', 'User'));
+            candidates.push(path.join(homeDir, 'Library', 'Application Support', 'Cursor', 'User'));
+            candidates.push(path.join(homeDir, 'Library', 'Application Support', 'VSCodium', 'User'));
+        } else if (process.platform === 'win32') {
+            const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+            candidates.push(path.join(appData, 'Code', 'User'));
+            candidates.push(path.join(appData, 'Code - Insiders', 'User'));
+            candidates.push(path.join(appData, 'Cursor', 'User'));
+            candidates.push(path.join(appData, 'VSCodium', 'User'));
+
+            // Check accessible WSL network shares from Windows
+            try {
+                const wslLocalhost = '\\\\wsl.localhost';
+                if (fs.existsSync(wslLocalhost)) {
+                    for (const distro of fs.readdirSync(wslLocalhost)) {
+                        const homePath = path.join(wslLocalhost, distro, 'home');
+                        if (fs.existsSync(homePath)) {
+                            for (const u of fs.readdirSync(homePath)) {
+                                candidates.push(path.join(homePath, u, '.vscode-server', 'data', 'User'));
+                                candidates.push(path.join(homePath, u, '.vscode-server-insiders', 'data', 'User'));
+                                candidates.push(path.join(homePath, u, '.config', 'Code', 'User'));
+                            }
+                        }
+                    }
+                }
+            } catch { /* ignore */ }
+        } else {
+            // Linux / Ubuntu / WSL2
+            candidates.push(path.join(homeDir, '.config', 'Code', 'User'));
+            candidates.push(path.join(homeDir, '.config', 'Code - Insiders', 'User'));
+            // VS Code Server paths (Remote - WSL, Remote - SSH, Dev Containers):
+            candidates.push(path.join(homeDir, '.vscode-server', 'data', 'User'));
+            candidates.push(path.join(homeDir, '.vscode-server-insiders', 'data', 'User'));
+            candidates.push(path.join(homeDir, '.vscode-remote-containers', 'data', 'User'));
+            candidates.push(path.join(homeDir, '.config', 'VSCodium', 'User'));
+            candidates.push(path.join(homeDir, '.config', 'Cursor', 'User'));
+            candidates.push(path.join(homeDir, '.cursor-server', 'data', 'User'));
+
+            // WSL2: also discover Windows host AppData if mounted under /mnt/c
+            try {
+                if (fs.existsSync('/mnt/c/Users')) {
+                    const winUsers = fs.readdirSync('/mnt/c/Users');
+                    for (const u of winUsers) {
+                        if (u === 'Public' || u === 'Default' || u === 'Default User' || u === 'All Users') { continue; }
+                        candidates.push(`/mnt/c/Users/${u}/AppData/Roaming/Code/User`);
+                        candidates.push(`/mnt/c/Users/${u}/AppData/Roaming/Code - Insiders/User`);
+                    }
+                }
+            } catch { /* ignore */ }
+        }
+
+        // Deduplicate and return only paths that exist.
+        const seen = new Set<string>();
+        return candidates.filter(p => {
+            const norm = path.normalize(p);
+            if (seen.has(norm)) { return false; }
+            seen.add(norm);
+            return fs.existsSync(norm);
+        });
+    }
+
+    /** @deprecated Use getStoragePaths() instead. Kept for internal call-site compatibility. */
+    private getVSCodeStoragePath(): string {
+        const paths = this.getVSCodeStoragePaths();
+        return paths.length > 0 ? paths[0] : path.join(os.homedir(), '.config', 'Code', 'User');
     }
 
     private async loadSessionTitles(basePath: string): Promise<void> {
@@ -270,19 +388,55 @@ export class ChatHistoryProvider {
     }
 
     private async parseWorkspaceStorage(basePath: string): Promise<void> {
-        const workspaceStoragePath = path.join(basePath, 'workspaceStorage');
+        let workspaceStoragePath = basePath;
+        if (path.basename(basePath).toLowerCase() !== 'workspacestorage') {
+            workspaceStoragePath = path.join(basePath, 'workspaceStorage');
+        }
+
         if (!fs.existsSync(workspaceStoragePath)) {
-            console.log('[CopilotReport] workspaceStorage not found');
+            // Also check if basePath itself directly contains chatSessions or transcripts:
+            const directCandidates = [
+                path.join(basePath, 'chatSessions'),
+                path.join(basePath, 'GitHub.copilot-chat', 'chatSessions'),
+                path.join(basePath, 'GitHub.copilot-chat', 'transcripts'),
+            ];
+            for (const c of directCandidates) {
+                if (fs.existsSync(c)) {
+                    await this.parseChatSessionsFolder(c, 'custom');
+                }
+            }
             return;
         }
+
         try {
             const workspaces = fs.readdirSync(workspaceStoragePath);
             for (const workspace of workspaces) {
                 const wsDir = path.join(workspaceStoragePath, workspace);
-                const chatSessionsPath = path.join(wsDir, 'chatSessions');
-                if (fs.existsSync(chatSessionsPath)) {
-                    this.workspaceLabels.set(workspace, this.readWorkspaceLabel(wsDir));
-                    await this.parseChatSessionsFolder(chatSessionsPath, workspace);
+                // Support legacy layout, new GitHub.copilot-chat/chatSessions, and transcripts (Issue #1)
+                const candidatePaths: string[] = [
+                    path.join(wsDir, 'chatSessions'),
+                    path.join(wsDir, 'GitHub.copilot-chat', 'chatSessions'),
+                    path.join(wsDir, 'GitHub.copilot-chat', 'transcripts'),
+                ];
+                for (const folder of candidatePaths) {
+                    if (fs.existsSync(folder)) {
+                        this.workspaceLabels.set(workspace, this.readWorkspaceLabel(wsDir));
+                        await this.parseChatSessionsFolder(folder, workspace);
+                    }
+                }
+            }
+
+            // Also check globalStorage candidates
+            const globalStorageCandidates = [
+                path.join(basePath, 'globalStorage', 'chatSessions'),
+                path.join(basePath, 'globalStorage', 'GitHub.copilot-chat', 'chatSessions'),
+                path.join(basePath, 'globalStorage', 'GitHub.copilot-chat', 'transcripts'),
+                path.join(basePath, 'globalStorage', 'github.copilot-chat', 'chatSessions'),
+                path.join(basePath, 'globalStorage', 'github.copilot-chat', 'transcripts'),
+            ];
+            for (const folder of globalStorageCandidates) {
+                if (fs.existsSync(folder)) {
+                    await this.parseChatSessionsFolder(folder, 'global');
                 }
             }
         } catch (error) {
@@ -362,7 +516,8 @@ export class ChatHistoryProvider {
     }
 
     private isRequestItem(it: any): boolean {
-        return it && typeof it === 'object' && it.requestId && it.message;
+        return it && typeof it === 'object' && typeof it.requestId === 'string' &&
+            Boolean(it.message || it.renderedUserMessage || it.response || it.result);
     }
 
     /**
@@ -534,6 +689,10 @@ export class ChatHistoryProvider {
             if (lines.length === 0) { return; }
 
             const firstLine = JSON.parse(lines[0]);
+            if (firstLine.type || lines.some(l => l.includes('"type":"user.message"'))) {
+                await this.parseCopilotTranscriptJsonl(filePath, lines, workspaceId);
+                return;
+            }
             const sessionData = firstLine.v || firstLine;
             if (typeof sessionData !== 'object' || Array.isArray(sessionData)) {
                 return;
@@ -710,17 +869,151 @@ export class ChatHistoryProvider {
 
             session.models = Array.from(modelSet);
 
-            if (storedInfo?.isEmpty === true) {
-                return; // skip sessions VS Code marked empty/deleted
-            }
             if (session.messages.length === 0) {
                 return; // nothing useful to show
             }
 
-            this.messages.push(...session.messages);
-            this.sessions.push(session);
+            this.addOrMergeSession(session);
         } catch (error) {
             console.error(`[CopilotReport] Error parsing JSONL ${filePath}:`, error);
+        }
+    }
+
+    /** Add session or merge with existing session to prevent duplicate entries (Issues #1, #3). */
+    private addOrMergeSession(session: ChatSession): void {
+        const existing = this.sessionsById.get(session.id);
+        if (!existing) {
+            this.sessionsById.set(session.id, session);
+            return;
+        }
+
+        // Merge / prefer whichever entry has richer usage data or higher message count
+        const existingHasUsage = existing.messages.some(m => m.usage?.inputTokens !== undefined || m.usage?.aic !== undefined);
+        const newHasUsage = session.messages.some(m => m.usage?.inputTokens !== undefined || m.usage?.aic !== undefined);
+
+        if (newHasUsage && !existingHasUsage) {
+            this.sessionsById.set(session.id, session);
+        } else if (session.messages.length > existing.messages.length && (newHasUsage || !existingHasUsage)) {
+            this.sessionsById.set(session.id, session);
+        }
+    }
+
+    /** Parse GitHub Copilot transcripts (*.jsonl event log format as seen in Remote Linux / WSL2). */
+    private async parseCopilotTranscriptJsonl(filePath: string, lines: string[], workspaceId: string): Promise<void> {
+        try {
+            let sessionId = path.basename(filePath, '.jsonl');
+            let sessionStartTime = 0;
+            const messages: ChatMessage[] = [];
+
+            for (const line of lines) {
+                let o: any;
+                try { o = JSON.parse(line); } catch { continue; }
+                if (!o || typeof o !== 'object') { continue; }
+
+                if (o.type === 'session.start') {
+                    if (o.data?.sessionId) {
+                        sessionId = o.data.sessionId;
+                    }
+                    if (o.data?.startTime) {
+                        sessionStartTime = new Date(o.data.startTime).getTime();
+                    } else if (o.timestamp) {
+                        sessionStartTime = new Date(o.timestamp).getTime();
+                    }
+                } else if (o.type === 'user.message') {
+                    const content = typeof o.data?.content === 'string' ? o.data.content : '';
+                    if (content.trim()) {
+                        const ts = o.timestamp ? new Date(o.timestamp).getTime() : (sessionStartTime || Date.now());
+                        messages.push({
+                            sessionId,
+                            timestamp: ts,
+                            role: 'user',
+                            content,
+                            preview: content.substring(0, 200)
+                        });
+                    }
+                } else if (o.type === 'assistant.message') {
+                    const content = typeof o.data?.content === 'string' ? o.data.content : (typeof o.data?.reasoningText === 'string' ? o.data.reasoningText : '');
+                    const ts = o.timestamp ? new Date(o.timestamp).getTime() : (sessionStartTime || Date.now());
+
+                    const msgLinks: FileLink[] = [];
+                    if (Array.isArray(o.data?.toolRequests)) {
+                        for (const tr of o.data.toolRequests) {
+                            if (typeof tr.arguments === 'string') {
+                                try {
+                                    const args = JSON.parse(tr.arguments);
+                                    if (args.filePath) {
+                                        msgLinks.push({
+                                            path: args.filePath,
+                                            lineNumber: args.startLine,
+                                            exists: this.checkFileExists(args.filePath),
+                                            action: tr.name?.includes('replace') || tr.name?.includes('edit') ? 'modified' : 'referenced'
+                                        });
+                                    }
+                                } catch { /* ignore */ }
+                            }
+                        }
+                    }
+
+                    if (content.trim() || msgLinks.length > 0) {
+                        messages.push({
+                            sessionId,
+                            timestamp: ts,
+                            role: 'assistant',
+                            content: content || 'Tool invocation',
+                            preview: (content || 'Tool invocation').substring(0, 200),
+                            fileLinks: msgLinks.length > 0 ? msgLinks : undefined
+                        });
+                    }
+                }
+            }
+
+            if (messages.length === 0) {
+                return;
+            }
+
+            const storedInfo = this.sessionTitles.get(sessionId);
+            let sessionTitle = storedInfo?.title || '';
+            if (!sessionTitle) {
+                const firstUser = messages.find(m => m.role === 'user');
+                if (firstUser?.content) {
+                    sessionTitle = firstUser.content.length > 60 ? firstUser.content.substring(0, 57) + '...' : firstUser.content;
+                }
+            }
+            if (!sessionTitle) {
+                sessionTitle = `Session ${sessionId.substring(0, 8)}`;
+            }
+
+            let lastMsgTimestamp = sessionStartTime || Date.now();
+            for (const m of messages) {
+                if (m.timestamp > lastMsgTimestamp) {
+                    lastMsgTimestamp = m.timestamp;
+                }
+            }
+
+            const inArchivedSet = this.archivedSessionIds.has(sessionId);
+            const finalIsArchived = (storedInfo?.isArchived === true) || inArchivedSet;
+
+            const session: ChatSession = {
+                id: sessionId,
+                title: sessionTitle,
+                timestamp: lastMsgTimestamp,
+                messages,
+                workspace: workspaceId,
+                workspaceLabel: this.workspaceLabels.get(workspaceId) || '',
+                filePath,
+                isArchived: finalIsArchived,
+                isDeleted: false,
+                promptCount: messages.filter(m => m.role === 'user').length,
+                totalInputTokens: 0,
+                totalOutputTokens: 0,
+                totalAic: 0,
+                aicComplete: false,
+                models: []
+            };
+
+            this.addOrMergeSession(session);
+        } catch (err) {
+            console.error(`[CopilotReport] Error parsing transcript ${filePath}:`, err);
         }
     }
 

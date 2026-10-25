@@ -19,10 +19,10 @@ This extension is **built on top of two open-source projects**:
 2. Search for **"Github Copilot Report"**.
 3. Click **Install** on the matching result.
 
-**Option 2 — Install from a `.vsix` file** (a prebuilt package included in the repo, e.g. `github-copilot-report-1.3.2.vsix`):
+**Option 2 — Install from a `.vsix` file** (a prebuilt package included in the repo, e.g. `github-copilot-report-1.5.0.vsix`):
 
 ```bash
-code --install-extension github-copilot-report-1.3.2.vsix
+code --install-extension github-copilot-report-1.5.0.vsix
 ```
 
 Or in VS Code: open the **Extensions** panel → `...` menu → **Install from VSIX...** → pick the `.vsix` file.
