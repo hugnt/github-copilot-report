@@ -189,6 +189,7 @@ export class ChatHistoryProvider {
         for (const vscodePath of vscodePaths) {
             await this.parseWorkspaceStorage(vscodePath);
         }
+        await this.parseCopilotAgentStorage();
 
         // Keep sessions sorted by latest activity descending.
         this.sessions = Array.from(this.sessionsById.values());
@@ -294,6 +295,54 @@ export class ChatHistoryProvider {
         }
 
         // Deduplicate and return only paths that exist.
+        const seen = new Set<string>();
+        return candidates.filter(p => {
+            const norm = path.normalize(p);
+            if (seen.has(norm)) { return false; }
+            seen.add(norm);
+            return fs.existsSync(norm);
+        });
+    }
+
+    /** Discover Copilot agent session directories (~/.copilot/session-state). */
+    public getCopilotAgentStoragePaths(): string[] {
+        const homeDir = os.homedir();
+        const candidates: string[] = [];
+
+        if (process.platform === 'win32') {
+            const userProfile = process.env.USERPROFILE || homeDir;
+            candidates.push(path.join(userProfile, '.copilot', 'session-state'));
+
+            // Check accessible WSL network shares from Windows
+            try {
+                const wslLocalhost = '\\\\wsl.localhost';
+                if (fs.existsSync(wslLocalhost)) {
+                    for (const distro of fs.readdirSync(wslLocalhost)) {
+                        const homePath = path.join(wslLocalhost, distro, 'home');
+                        if (fs.existsSync(homePath)) {
+                            for (const u of fs.readdirSync(homePath)) {
+                                candidates.push(path.join(homePath, u, '.copilot', 'session-state'));
+                            }
+                        }
+                    }
+                }
+            } catch { /* ignore */ }
+        } else {
+            // Linux / macOS / WSL
+            candidates.push(path.join(homeDir, '.copilot', 'session-state'));
+
+            // WSL2: also discover Windows host .copilot if mounted under /mnt/c
+            try {
+                if (fs.existsSync('/mnt/c/Users')) {
+                    const winUsers = fs.readdirSync('/mnt/c/Users');
+                    for (const u of winUsers) {
+                        if (u === 'Public' || u === 'Default' || u === 'Default User' || u === 'All Users') { continue; }
+                        candidates.push(`/mnt/c/Users/${u}/.copilot/session-state`);
+                    }
+                }
+            } catch { /* ignore */ }
+        }
+
         const seen = new Set<string>();
         return candidates.filter(p => {
             const norm = path.normalize(p);
@@ -881,7 +930,24 @@ export class ChatHistoryProvider {
 
     /** Add session or merge with existing session to prevent duplicate entries (Issues #1, #3). */
     private addOrMergeSession(session: ChatSession): void {
-        const existing = this.sessionsById.get(session.id);
+        let existing = this.sessionsById.get(session.id);
+
+        // Also check if an identical session exists under a different identifier (e.g. transcript vs session hash)
+        if (!existing) {
+            const firstUserPrompt = session.messages.find(m => m.role === 'user')?.content.trim();
+            if (firstUserPrompt && firstUserPrompt.length > 5) {
+                for (const s of this.sessionsById.values()) {
+                    if (Math.abs(s.timestamp - session.timestamp) < 10000) {
+                        const sFirstPrompt = s.messages.find(m => m.role === 'user')?.content.trim();
+                        if (sFirstPrompt === firstUserPrompt) {
+                            existing = s;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         if (!existing) {
             this.sessionsById.set(session.id, session);
             return;
@@ -891,10 +957,255 @@ export class ChatHistoryProvider {
         const existingHasUsage = existing.messages.some(m => m.usage?.inputTokens !== undefined || m.usage?.aic !== undefined);
         const newHasUsage = session.messages.some(m => m.usage?.inputTokens !== undefined || m.usage?.aic !== undefined);
 
-        if (newHasUsage && !existingHasUsage) {
-            this.sessionsById.set(session.id, session);
-        } else if (session.messages.length > existing.messages.length && (newHasUsage || !existingHasUsage)) {
-            this.sessionsById.set(session.id, session);
+        const isBetterTitle = (t1?: string, t2?: string): boolean => {
+            if (!t1 || t1.startsWith('Session ')) { return false; }
+            if (!t2 || t2.startsWith('Session ')) { return true; }
+            return t1.length > t2.length;
+        };
+
+        const target = (newHasUsage && !existingHasUsage) ||
+            (session.messages.length > existing.messages.length && (newHasUsage || !existingHasUsage))
+            ? session : existing;
+        const other = target === session ? existing : session;
+
+        // Preserve best metadata
+        if (isBetterTitle(other.title, target.title)) {
+            target.title = other.title;
+        }
+        if (!target.workspaceLabel && other.workspaceLabel) {
+            target.workspaceLabel = other.workspaceLabel;
+        }
+        if (other.isArchived && !target.isArchived) {
+            target.isArchived = true;
+        }
+
+        // Ensure target is in map under its id and remove stale id if merging across different ids
+        if (target !== existing) {
+            this.sessionsById.delete(existing.id);
+            this.sessionsById.set(target.id, target);
+        }
+    }
+
+    private async parseCopilotAgentStorage(): Promise<void> {
+        const agentPaths = this.getCopilotAgentStoragePaths();
+        for (const agentPath of agentPaths) {
+            try {
+                if (!fs.existsSync(agentPath)) { continue; }
+                const entries = fs.readdirSync(agentPath);
+                for (const sessionFolder of entries) {
+                    if (sessionFolder.startsWith('.')) { continue; }
+                    const sessionDir = path.join(agentPath, sessionFolder);
+                    try {
+                        const stat = fs.statSync(sessionDir);
+                        if (stat.isDirectory()) {
+                            await this.parseCopilotAgentSession(sessionDir);
+                        }
+                    } catch { /* skip */ }
+                }
+            } catch (err) {
+                console.error('[CopilotReport] Error reading copilot agent storage:', err);
+            }
+        }
+    }
+
+    private async parseCopilotAgentSession(sessionDir: string): Promise<void> {
+        const eventsPath = path.join(sessionDir, 'events.jsonl');
+        if (!fs.existsSync(eventsPath)) {
+            return;
+        }
+
+        try {
+            const yamlPath = path.join(sessionDir, 'workspace.yaml');
+            let sessionId = path.basename(sessionDir);
+            let sessionTitle = '';
+            let cwd = '';
+            let workspaceLabel = '';
+            let createdAt = 0;
+
+            if (fs.existsSync(yamlPath)) {
+                try {
+                    const yamlContent = fs.readFileSync(yamlPath, 'utf8');
+                    for (const line of yamlContent.split('\n')) {
+                        const idx = line.indexOf(':');
+                        if (idx > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+                            const k = line.slice(0, idx).trim();
+                            const v = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+                            if (k === 'id' && v) { sessionId = v; }
+                            if (k === 'name' && v) { sessionTitle = v; }
+                            if (k === 'cwd' && v) { cwd = v; }
+                            if (k === 'created_at' && v) { createdAt = new Date(v).getTime(); }
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+
+            if (cwd) {
+                const decoded = decodeURIComponent(cwd);
+                workspaceLabel = path.basename(decoded.replace(/[\\/]+$/, '')) || decoded;
+            }
+
+            const content = fs.readFileSync(eventsPath, 'utf8');
+            const lines = content.split('\n').filter(l => l.trim());
+            if (lines.length === 0) { return; }
+
+            const messages: ChatMessage[] = [];
+            let lastTimestamp = createdAt || Date.now();
+            let currentPromptUsage: PromptUsage | null = null;
+            const modelSet = new Set<string>();
+            let totalInputTokens = 0;
+            let totalOutputTokens = 0;
+            let totalAic = 0;
+            let aicComplete = true;
+
+            for (const line of lines) {
+                let e: any;
+                try { e = JSON.parse(line); } catch { continue; }
+                if (!e || typeof e !== 'object') { continue; }
+
+                const ts = e.timestamp ? new Date(e.timestamp).getTime() : (lastTimestamp || Date.now());
+                if (ts > lastTimestamp) { lastTimestamp = ts; }
+
+                if (e.type === 'user.message') {
+                    let text = typeof e.data?.content === 'string' ? e.data.content : '';
+                    if (!text && typeof e.data?.transformedContent === 'string') {
+                        text = e.data.transformedContent.replace(/<current_datetime>[\s\S]*?<\/current_datetime>/g, '').trim();
+                    }
+                    text = text.trim();
+                    if (!text) { continue; }
+
+                    currentPromptUsage = {
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        cacheTokens: 0,
+                        nanoAiu: 0,
+                        aic: 0,
+                        model: ''
+                    };
+
+                    messages.push({
+                        sessionId,
+                        timestamp: ts,
+                        role: 'user',
+                        content: text,
+                        preview: text.substring(0, 200),
+                        usage: currentPromptUsage
+                    });
+                } else if (e.type === 'assistant.message') {
+                    let respText = typeof e.data?.content === 'string' ? e.data.content : (typeof e.data?.reasoningText === 'string' ? e.data.reasoningText : '');
+                    const toolRequests = Array.isArray(e.data?.toolRequests) ? e.data.toolRequests : [];
+                    if (!respText.trim() && toolRequests.length > 0) {
+                        respText = toolRequests.map((tr: any) => tr.intentionSummary || tr.toolTitle || tr.name || 'Tool call').join(', ');
+                    }
+                    if (respText.trim() || toolRequests.length > 0) {
+                        const fileLinks = this.extractFileLinks(respText);
+                        for (const tr of toolRequests) {
+                            if (typeof tr.arguments === 'object' && tr.arguments) {
+                                const fp = tr.arguments.filePath || tr.arguments.path;
+                                if (typeof fp === 'string' && fp.trim()) {
+                                    const action: FileLink['action'] = tr.name?.includes('replace') || tr.name?.includes('edit') ? 'modified' : 'referenced';
+                                    fileLinks.push({
+                                        path: fp.trim(),
+                                        exists: this.checkFileExists(fp.trim()),
+                                        action
+                                    });
+                                }
+                            }
+                        }
+                        messages.push({
+                            sessionId,
+                            timestamp: ts,
+                            role: 'assistant',
+                            content: respText || 'Tool invocation',
+                            preview: (respText || 'Tool invocation').substring(0, 200),
+                            fileLinks: fileLinks.length > 0 ? fileLinks : undefined
+                        });
+                    }
+                } else if (e.type === 'session.usage_record') {
+                    const u = e.data?.usage;
+                    if (u) {
+                        const inp = typeof u.inputTokens === 'number' ? u.inputTokens : 0;
+                        const out = typeof u.outputTokens === 'number' ? u.outputTokens : 0;
+                        const cache = typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0;
+                        const nano = typeof u.copilotUsage?.totalNanoAiu === 'number' ? u.copilotUsage.totalNanoAiu
+                            : (typeof u.copilot_usage?.total_nano_aiu === 'number' ? u.copilot_usage.total_nano_aiu
+                            : (typeof u.totalNanoAiu === 'number' ? u.totalNanoAiu : 0));
+                        const rawModel = u.modelDisplayName || u.model || '';
+                        if (rawModel) {
+                            const norm = normalizeModelId(rawModel);
+                            modelSet.add(norm);
+                            if (u.modelDisplayName) {
+                                registerModelDisplayName(norm, u.modelDisplayName);
+                            }
+                        }
+
+                        totalInputTokens += inp;
+                        totalOutputTokens += out;
+                        if (nano > 0) {
+                            totalAic += (nano / NANO_AIU_PER_AIC);
+                        } else if (u.aiCreditsStatus !== 'complete' && nano === 0) {
+                            aicComplete = false;
+                        }
+
+                        if (currentPromptUsage) {
+                            currentPromptUsage.inputTokens = (currentPromptUsage.inputTokens || 0) + inp;
+                            currentPromptUsage.outputTokens = (currentPromptUsage.outputTokens || 0) + out;
+                            currentPromptUsage.cacheTokens = (currentPromptUsage.cacheTokens || 0) + cache;
+                            currentPromptUsage.nanoAiu = (currentPromptUsage.nanoAiu || 0) + nano;
+                            currentPromptUsage.aic = (currentPromptUsage.nanoAiu || 0) / NANO_AIU_PER_AIC;
+                            if (!currentPromptUsage.model && rawModel) {
+                                currentPromptUsage.model = normalizeModelId(rawModel);
+                            }
+                        }
+                    }
+                } else if (e.type === 'session.usage_checkpoint') {
+                    const snap = e.data?.accountingSnapshot;
+                    if (snap && totalAic === 0 && typeof snap.totalNanoAiu === 'number' && snap.totalNanoAiu > 0) {
+                        totalAic = snap.totalNanoAiu / NANO_AIU_PER_AIC;
+                        if (typeof snap.tokenDetails?.input?.tokenCount === 'number') {
+                            totalInputTokens = Math.max(totalInputTokens, snap.tokenDetails.input.tokenCount);
+                        }
+                        if (typeof snap.tokenDetails?.output?.tokenCount === 'number') {
+                            totalOutputTokens = Math.max(totalOutputTokens, snap.tokenDetails.output.tokenCount);
+                        }
+                    }
+                }
+            }
+
+            if (messages.length === 0) {
+                return;
+            }
+
+            if (!sessionTitle) {
+                const firstUser = messages.find(m => m.role === 'user');
+                if (firstUser?.content) {
+                    sessionTitle = firstUser.content.length > 60 ? firstUser.content.substring(0, 57) + '...' : firstUser.content;
+                }
+            }
+            if (!sessionTitle) {
+                sessionTitle = `Session ${sessionId.substring(0, 8)}`;
+            }
+
+            const session: ChatSession = {
+                id: sessionId,
+                title: sessionTitle,
+                timestamp: lastTimestamp,
+                messages,
+                workspace: cwd || 'agent',
+                workspaceLabel: workspaceLabel || 'Agent',
+                filePath: eventsPath,
+                isArchived: false,
+                isDeleted: false,
+                promptCount: messages.filter(m => m.role === 'user').length,
+                totalInputTokens,
+                totalOutputTokens,
+                totalAic,
+                aicComplete,
+                models: Array.from(modelSet)
+            };
+
+            this.addOrMergeSession(session);
+        } catch (err) {
+            console.error(`[CopilotReport] Error parsing Copilot agent session in ${sessionDir}:`, err);
         }
     }
 

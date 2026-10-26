@@ -488,7 +488,18 @@ function setupStateDbWatchers(): void {
             }
         } catch { /* ignore */ }
     }
-    logReport(`[CopilotReport] Watching ${stateDbWatchers.length} state.vscdb files for live updates.`);
+
+    // Watch .copilot/session-state directories for changes as well
+    const agentPaths = chatHistoryProvider.getCopilotAgentStoragePaths();
+    for (const ap of agentPaths) {
+        if (!fs.existsSync(ap)) { continue; }
+        try {
+            const watcher = fs.watch(ap, () => scheduleRefresh());
+            stateDbWatchers.push(watcher);
+        } catch { /* ignore unwatchable files */ }
+    }
+
+    logReport(`[CopilotReport] Watching ${stateDbWatchers.length} locations (state.vscdb & agent session-state) for live updates.`);
 }
 
 function scheduleRefresh(): void {
